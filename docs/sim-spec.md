@@ -206,26 +206,110 @@ Using `scram` ends the run as a `stabilized` outcome. In Site mode, this counts 
 The simulation emits events for the renderer to subscribe to. Events are the only way the renderer learns about state changes — it never polls.
 
 ### 8.1 Event Types
-- `tick` — every tick, with current criticality and zone
-- `atomSpawned` — new atom appears (from fuel rod release)
-- `atomSplit` — atom transitions to `splitting`
-- `atomSpent` — atom enters `spent` state
-- `atomDecayed` — atom auto-decayed without splitting
-- `neutronSpawned` — new neutron in flight
-- `neutronAbsorbed` — neutron absorbed by atom or control rod
-- `neutronExpired` — emitted when a neutron is removed from the simulation. Payload: `{ neutronId, tick, reason: 'expired' | 'out-of-bounds' | 'absorbed' }`.
-- `controlRodPlaced` — player placed a rod
-- `controlRodDepleted` — rod durability reached 0
-- `fuelRodPlaced` — player placed a fuel rod
-- `fuelRodExhausted` — fuel rod released all atoms
-- `criticalityZoneChanged` — k crossed a zone boundary
-- `runEnded` — meltdown, extinction, sustained objective met, or SCRAM
+
+Every event carries the typed payload described below in its `data` field. Per ADR-018, payloads are self-contained: a subscriber must be able to act on an event without re-reading sim state. The `tick` field is part of the envelope (§8.2) and is not duplicated in per-event payloads. Field names use full entity disambiguation (`atomId`, `neutronId`, etc.) rather than bare `id`.
+
+#### `tick`
+When emitted: once per tick after all phases have run.
+Payload:
+- `criticality: number` — current criticality value `k` (§5.1)
+- `zone: CriticalityZone` — current zone (§5.2)
+
+#### `atomSpawned`
+When emitted: when a new atom appears on the playfield (today, only via fuel rod release in phase 2).
+Payload:
+- `atomId: AtomId`
+- `type: AtomType`
+- `position: Vec2` — sim-space position at spawn
+
+#### `atomSplit`
+When emitted: when an atom's state transitions to `splitting` as the result of a fission event.
+Payload:
+- `atomId: AtomId`
+- `position: Vec2` — atom's position at the moment of split
+- `neutronsReleased: number` — count of neutrons spawned by this split (the spawned neutrons are reported individually via `neutronSpawned` events)
+
+#### `atomSpent`
+When emitted: when an atom enters the `spent` state (post-split, post-absorption, or after SCRAM).
+Payload:
+- `atomId: AtomId`
+- `position: Vec2`
+
+#### `atomDecayed`
+When emitted: when an atom auto-decays via the `decaysAt` mechanism without splitting (e.g., Pu239 unstable timeout).
+Payload:
+- `atomId: AtomId`
+- `type: AtomType`
+- `position: Vec2`
+
+#### `neutronSpawned`
+When emitted: whenever a neutron is created (player `injectNeutron`, fission release, or any future spawn path).
+Payload:
+- `neutronId: NeutronId`
+- `position: Vec2` — spawn position
+- `velocity: { vx: number; vy: number }` — initial velocity vector
+
+#### `neutronAbsorbed`
+When emitted: when a neutron is absorbed by an atom (resulting in fission or capture) or by a control rod.
+Payload:
+- `neutronId: NeutronId`
+- `absorbedBy: 'atom' | 'controlRod'` — which kind of entity absorbed it
+- `targetId: AtomId | ControlRodId` — the absorbing entity's id
+- `position: Vec2` — neutron's position at absorption
+
+#### `neutronExpired`
+When emitted: when a neutron is removed from the simulation for any reason. The `reason` distinguishes lifetime end, leaving the playfield, and absorption.
+Payload:
+- `neutronId: NeutronId`
+- `reason: 'expired' | 'out-of-bounds' | 'absorbed'`
+
+(`absorbed` is the same removal as `neutronAbsorbed`'s emission; both events fire for the same removal so a subscriber can listen to either channel without missing the lifecycle end. Per ADR-014, this duplication is intentional: `neutronAbsorbed` carries the interaction context, `neutronExpired` is the canonical "this neutron is gone now" notification.)
+
+#### `controlRodPlaced`
+When emitted: when the player successfully places a control rod (phase 1 input handling).
+Payload:
+- `controlRodId: ControlRodId`
+- `position: Vec2` — center point
+- `radius: number` — area of effect
+
+#### `controlRodDepleted`
+When emitted: when a control rod's `durability` reaches 0 and it is removed from the simulation.
+Payload:
+- `controlRodId: ControlRodId`
+- `position: Vec2`
+
+#### `fuelRodPlaced`
+When emitted: when the player successfully places a fuel rod (phase 1 input handling).
+Payload:
+- `fuelRodId: FuelRodId`
+- `position: Vec2` — center point
+- `radius: number` — area of effect (per-instance, see §2.4)
+
+#### `fuelRodExhausted`
+When emitted: when a fuel rod's `releaseSchedule` has fully fired (or been skipped) and the rod transitions to `exhausted: true` (phase 2).
+Payload:
+- `fuelRodId: FuelRodId`
+- `position: Vec2`
+
+#### `criticalityZoneChanged`
+When emitted: when criticality `k` crosses a zone boundary (phase 8/recompute), at most once per tick.
+Payload:
+- `previousZone: CriticalityZone`
+- `newZone: CriticalityZone`
+- `k: number` — criticality value at the moment of crossing
+
+#### `runEnded`
+When emitted: exactly once when the run ends, for any reason. After this event, no further entity events are emitted.
+Payload:
+- `outcome: 'meltdown' | 'extinction' | 'sustained' | 'stabilized'` — `meltdown` and `extinction` are lose conditions (§7.1); `sustained` is a Site objective met (§7.2); `stabilized` is SCRAM (§7.3)
+- `finalTick: number` — the tick at which the run ended
+- `finalScore: number` — total score accumulated over the run (0 if no scoring occurred, e.g., SCRAM before any nominal time)
 
 ### 8.2 Event Schema
 Every event has:
 - `type` — string, one of the above
 - `tick` — tick number when emitted
-- `data` — type-specific payload
+- `data` — type-specific payload (see §8.1)
 
 Events are emitted in tick-order batches. The renderer receives them after the tick completes, so all state is consistent when handlers run.
 
