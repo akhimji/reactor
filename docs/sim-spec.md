@@ -221,6 +221,8 @@ The player has exactly four action types in v1. Each action is a command submitt
 - **Cost / cooldown:** Single use per Site, or long cooldown in endless mode.
 - **Use case:** Panic button. Saves the reactor from meltdown but ends the run as a "stabilized" outcome.
 
+Cleanup of in-flight neutrons and atom states is performed by phases 6 and 7 in subsequent ticks, not phase 1. This produces a brief visible decay following SCRAM.
+
 ---
 
 ## 7. Win/Lose Conditions
@@ -370,6 +372,8 @@ Categories:
 - **Scoring** — base rate, edge multipliers
 
 Per-Site overrides layer on top of the default config. Balance changes are pure data, never code.
+
+Default values for v1 are placeholders pending balance work. See `packages/sim/configs/default.json` for current values. The categories of tunable parameters are part of the architectural contract; the specific values are not.
 
 ---
 
