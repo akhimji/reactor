@@ -1,0 +1,19 @@
+{
+  "name": "@reactor/tools",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reactor headless tooling. Balance scripts, replay utilities. Sim only — no Phaser.",
+  "scripts": {
+    "balance": "tsx src/balance.ts",
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@reactor/sim": "workspace:*"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2"
+  }
+}

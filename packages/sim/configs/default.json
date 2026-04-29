@@ -1,0 +1,66 @@
+{
+  "tickHz": 60,
+  "criticalityWindow": 120,
+  "atoms": {
+    "U235": {
+      "splitChance": 0.85,
+      "absorbChance": 0.0,
+      "neutronsPerSplit": { "min": 2, "max": 3 },
+      "decayTicks": null,
+      "yield": 1
+    },
+    "U238": {
+      "splitChance": 0.05,
+      "absorbChance": 0.95,
+      "neutronsPerSplit": { "min": 2, "max": 2 },
+      "decayTicks": null,
+      "yield": 1
+    },
+    "Pu239": {
+      "splitChance": 0.95,
+      "absorbChance": 0.0,
+      "neutronsPerSplit": { "min": 2, "max": 4 },
+      "decayTicks": 1800,
+      "yield": 2
+    },
+    "B10": {
+      "splitChance": 0.0,
+      "absorbChance": 0.9,
+      "neutronsPerSplit": { "min": 0, "max": 0 },
+      "decayTicks": null,
+      "yield": 0
+    }
+  },
+  "neutron": {
+    "defaultSpeed": 4,
+    "lifetimeTicks": 600
+  },
+  "criticality": {
+    "baselineNeutronRate": 8,
+    "zoneBoundaries": {
+      "extinct": 0.1,
+      "subcritical": 0.9,
+      "nominal": 1.1,
+      "supercritical": 1.5,
+      "runaway": 2.0
+    }
+  },
+  "actions": {
+    "injectCooldown": 30,
+    "controlRod": {
+      "radius": 30,
+      "durability": 50,
+      "absorbStrength": 0.7
+    }
+  },
+  "endConditions": {
+    "meltdownThreshold": 2.0,
+    "extinctionThreshold": 0.1,
+    "extinctionGracePeriod": 300
+  },
+  "scoring": {
+    "basePerTick": 1,
+    "edgeMultiplier": 2
+  },
+  "minAtomSpacing": 1.5
+}

@@ -1,0 +1,20 @@
+{
+  "name": "@reactor/game",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reactor game shell. Phaser 3 presentation layer over @reactor/sim.",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "@reactor/sim": "workspace:*",
+    "phaser": "^3.86.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11"
+  }
+}

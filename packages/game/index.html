@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Reactor</title>
+    <style>
+      :root {
+        color-scheme: dark;
+      }
+      html,
+      body {
+        margin: 0;
+        height: 100%;
+        background: #0a0a0a;
+        color: #c8c8c8;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      }
+      #app {
+        display: grid;
+        place-items: center;
+        height: 100%;
+        text-align: center;
+      }
+      #app small {
+        display: block;
+        margin-top: 0.5rem;
+        opacity: 0.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="app">
+      reactor
+      <small>scaffold — sim wired, no game yet</small>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

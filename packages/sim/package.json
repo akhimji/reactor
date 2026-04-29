@@ -1,0 +1,25 @@
+{
+  "name": "@reactor/sim",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Reactor simulation core. Headless, deterministic, event-driven. Zero runtime deps.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./configs/default.json": "./configs/default.json"
+  },
+  "files": [
+    "dist",
+    "configs"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc -b",
+    "test": "vitest run"
+  }
+}
