@@ -211,7 +211,9 @@ describe('phase 1: process inputs', () => {
       expect(s1.ended).toEqual({ reason: 'stabilized' });
       expect(s1.inventory.scramAvailable).toBe(false);
       const ended = findEvent(s1.pendingEvents, 'runEnded');
-      expect(ended?.data.reason).toBe('stabilized');
+      expect(ended?.data.outcome).toBe('stabilized');
+      expect(ended?.data.finalTick).toBe(1);
+      expect(ended?.data.finalScore).toBe(0);
     });
 
     it('is rejected silently if scramAvailable is already false', () => {

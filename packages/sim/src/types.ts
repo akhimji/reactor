@@ -43,6 +43,7 @@ export type FuelRodReleaseEntry = {
 export type FuelRod = {
   readonly id: FuelRodId;
   readonly position: Vec2;
+  readonly radius: number;
   readonly placedAt: number;
   readonly releaseSchedule: readonly FuelRodReleaseEntry[];
   readonly exhausted: boolean;
@@ -56,4 +57,4 @@ export type CriticalityZone =
   | 'runaway'
   | 'meltdown';
 
-export type RunEndReason = 'meltdown' | 'extinction' | 'objective' | 'stabilized';
+export type RunEndReason = 'meltdown' | 'extinction' | 'sustained' | 'stabilized';

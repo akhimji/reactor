@@ -112,7 +112,11 @@ function applyInjectNeutron(
     nextEntityId: state.nextEntityId + 1,
     pendingEvents: [
       ...state.pendingEvents,
-      { type: 'neutronSpawned', tick: state.tick, data: { id } },
+      {
+        type: 'neutronSpawned',
+        tick: state.tick,
+        data: { neutronId: id, position, velocity: { vx, vy } },
+      },
     ],
   };
 }
@@ -121,10 +125,11 @@ function applyPlaceControlRod(state: SimState, position: Vec2, config: SimConfig
   if (state.inventory.controlRods <= 0) return state;
 
   const id = state.nextEntityId as ControlRodId;
+  const radius = config.actions.controlRod.radius;
   const rod: ControlRod = {
     id,
     position,
-    radius: config.actions.controlRod.radius,
+    radius,
     placedAt: state.tick,
     durability: config.actions.controlRod.durability,
     absorbStrength: config.actions.controlRod.absorbStrength,
@@ -140,7 +145,11 @@ function applyPlaceControlRod(state: SimState, position: Vec2, config: SimConfig
     nextEntityId: state.nextEntityId + 1,
     pendingEvents: [
       ...state.pendingEvents,
-      { type: 'controlRodPlaced', tick: state.tick, data: { id } },
+      {
+        type: 'controlRodPlaced',
+        tick: state.tick,
+        data: { controlRodId: id, position, radius },
+      },
     ],
   };
 }
@@ -154,10 +163,11 @@ function applyPlaceFuelRod(
   if (state.inventory.fuelRods <= 0) return state;
   if (!hasAnyFuel(fuelMix)) return state;
 
+  const radius = config.actions.fuelRod.radius;
   const { schedule, nextPrng } = generateReleaseSchedule(
     fuelMix,
     state.tick,
-    config.actions.fuelRod.radius,
+    radius,
     config.actions.fuelRod.releaseDuration,
     state.prng,
   );
@@ -168,6 +178,7 @@ function applyPlaceFuelRod(
   const rod: FuelRod = {
     id,
     position,
+    radius,
     placedAt: state.tick,
     releaseSchedule: schedule,
     exhausted: false,
@@ -184,7 +195,11 @@ function applyPlaceFuelRod(
     nextEntityId: state.nextEntityId + 1,
     pendingEvents: [
       ...state.pendingEvents,
-      { type: 'fuelRodPlaced', tick: state.tick, data: { id } },
+      {
+        type: 'fuelRodPlaced',
+        tick: state.tick,
+        data: { fuelRodId: id, position, radius },
+      },
     ],
   };
 }
@@ -198,7 +213,11 @@ function applyScram(state: SimState): SimState {
     ended: { reason: 'stabilized' },
     pendingEvents: [
       ...state.pendingEvents,
-      { type: 'runEnded', tick: state.tick, data: { reason: 'stabilized' } },
+      {
+        type: 'runEnded',
+        tick: state.tick,
+        data: { outcome: 'stabilized', finalTick: state.tick, finalScore: 0 },
+      },
     ],
   };
 }
@@ -262,7 +281,6 @@ function phaseAdvanceFuelRods(state: SimState, config: SimConfig): SimState {
   if (state.fuelRods.size === 0) return state;
 
   const minSpacing = config.minAtomSpacing;
-  const rodRadius = config.actions.fuelRod.radius;
 
   let atoms: ReadonlyMap<AtomId, Atom> = state.atoms;
   let prng = state.prng;
@@ -302,7 +320,7 @@ function phaseAdvanceFuelRods(state: SimState, config: SimConfig): SimState {
           };
           const dx = candidate.x - rod.position.x;
           const dy = candidate.y - rod.position.y;
-          if (Math.hypot(dx, dy) > rodRadius) continue;
+          if (Math.hypot(dx, dy) > rod.radius) continue;
           if (!violatesSpacing(candidate, atoms, minSpacing)) {
             position = candidate;
             break;
@@ -327,13 +345,21 @@ function phaseAdvanceFuelRods(state: SimState, config: SimConfig): SimState {
       nextAtoms.set(atomId, atom);
       atoms = nextAtoms;
       rodAtomsAdded += 1;
-      newEvents.push({ type: 'atomSpawned', tick: state.tick, data: { id: atomId } });
+      newEvents.push({
+        type: 'atomSpawned',
+        tick: state.tick,
+        data: { atomId, type: entry.atomType, position },
+      });
     }
 
     const allReleased = rod.releaseSchedule.every((e) => e.atTick <= state.tick);
     if (allReleased && !rod.exhausted) {
       updatedRods.set(rodId, { ...rod, exhausted: true });
-      newEvents.push({ type: 'fuelRodExhausted', tick: state.tick, data: { id: rodId } });
+      newEvents.push({
+        type: 'fuelRodExhausted',
+        tick: state.tick,
+        data: { fuelRodId: rodId, position: rod.position },
+      });
       mutated = true;
     } else if (rodAtomsAdded > 0) {
       updatedRods.set(rodId, rod);
@@ -396,7 +422,7 @@ function phaseAdvanceNeutrons(state: SimState, config: SimConfig): SimState {
       expirationEvents.push({
         type: 'neutronExpired',
         tick: state.tick,
-        data: { id, reason: 'expired' },
+        data: { neutronId: id, reason: 'expired' },
       });
       continue;
     }
@@ -415,7 +441,7 @@ function phaseAdvanceNeutrons(state: SimState, config: SimConfig): SimState {
       expirationEvents.push({
         type: 'neutronExpired',
         tick: state.tick,
-        data: { id, reason: 'out-of-bounds' },
+        data: { neutronId: id, reason: 'out-of-bounds' },
       });
       continue;
     }

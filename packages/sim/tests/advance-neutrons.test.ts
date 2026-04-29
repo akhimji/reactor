@@ -34,7 +34,7 @@ function withNeutrons(state: SimState, neutrons: readonly Neutron[]): SimState {
 function findExpired(events: readonly SimEvent[], id: NeutronId) {
   return events.find(
     (e): e is Extract<SimEvent, { type: 'neutronExpired' }> =>
-      e.type === 'neutronExpired' && e.data.id === id,
+      e.type === 'neutronExpired' && e.data.neutronId === id,
   );
 }
 

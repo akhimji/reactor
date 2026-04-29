@@ -47,10 +47,12 @@ function makeRod(
   id: number,
   schedule: readonly FuelRodReleaseEntry[],
   position = { x: 0, y: 0 },
+  radius = config.actions.fuelRod.radius,
 ): FuelRod {
   return {
     id: fidT(id),
     position,
+    radius,
     placedAt: 0,
     releaseSchedule: schedule,
     exhausted: false,
@@ -145,7 +147,12 @@ describe('phase 2: advance fuel rods', () => {
       },
     };
 
-    const rod = makeRod(1, [{ atTick: 1, atomType: 'U235', offset: { x: 0, y: 0 } }]);
+    const rod = makeRod(
+      1,
+      [{ atTick: 1, atomType: 'U235', offset: { x: 0, y: 0 } }],
+      { x: 0, y: 0 },
+      tinyConfig.actions.fuelRod.radius,
+    );
     const initial = withFuelRods(withAtoms(createSimState(7, tinyConfig), ring), [rod]);
 
     const s1 = advanceTick(initial, [], tinyConfig);
@@ -196,7 +203,12 @@ describe('phase 2: advance fuel rods', () => {
       },
     };
 
-    const rod = makeRod(1, [{ atTick: 1, atomType: 'U235', offset: { x: 0, y: 0 } }]);
+    const rod = makeRod(
+      1,
+      [{ atTick: 1, atomType: 'U235', offset: { x: 0, y: 0 } }],
+      { x: 0, y: 0 },
+      tinyConfig.actions.fuelRod.radius,
+    );
     const initial = withFuelRods(withAtoms(createSimState(7, tinyConfig), ring), [rod]);
 
     const s1 = advanceTick(initial, [], tinyConfig);
