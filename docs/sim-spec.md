@@ -71,6 +71,46 @@ A player-placed bundle that introduces new atoms into the playfield. Each fuel r
 
 Fuel rods are how the player adds fuel to a struggling reaction. `radius` is per-instance (mirroring `ControlRod` in §2.3): in v1 every fuel rod uses `actions.fuelRod.radius` from the config at placement time, but the field belongs on the entity so future variants (small fuel cells, oversized salvage rods) can carry their own radius without a spec change.
 
+#### 2.4.1 `fuelMix` → `releaseSchedule` algorithm
+
+When a fuel rod is placed via `placeFuelRod` (§6.3), the input `fuelMix: Record<AtomType, number>` is expanded into a deterministic `releaseSchedule` at placement time. The algorithm is part of the contract: changes (e.g., from "evenly spaced" to "weighted" or "burst") require a spec amendment.
+
+**Inputs:**
+- `fuelMix` — count per atom type
+- `currentTick` — the tick on which the rod is placed
+- `rodRadius` — the rod's radius (`actions.fuelRod.radius` at placement time, see §2.4)
+- `releaseDuration` — `actions.fuelRod.releaseDuration` from config
+- `prng` — the sim's seeded PRNG state (per ADR-005, all randomness must thread through this)
+
+**Algorithm:**
+
+1. **Flatten.** Iterate atom types in fixed key order (`U235`, `U238`, `Pu239`, `B10`) and append `count` copies of each type to a flat list. The fixed order is required for determinism: changing it changes which type appears at which scheduled tick for the same `fuelMix`. Let `total` be the length of this list.
+
+2. **Schedule ticks.** Atoms are spaced evenly across the release window. For atom index `i` (0-based) in the flat list:
+   ```
+   atTick = currentTick + max(1, floor((i + 1) * releaseDuration / total))
+   ```
+   The `+1` ensures the first atom releases at `currentTick + 1` at the earliest (never on the placement tick itself, consistent with ADR-016 same-tick spawn deferral). The `max(1, …)` prevents collapse to `currentTick` when `total > releaseDuration`.
+
+3. **Position offset (uniform-disk).** Each atom gets an offset within the rod's disk via two PRNG draws:
+   ```
+   [u1, prng] = next(prng)
+   [u2, prng] = next(prng)
+   angle = u1 * 2π
+   r = rodRadius * sqrt(u2)
+   offset = { x: r * cos(angle), y: r * sin(angle) }
+   ```
+   The `sqrt(u2)` is the standard inverse-CDF correction for uniform distribution by area on a disk (without it, samples cluster near the center). PRNG draws happen in flat-list order — this fixes which `(u1, u2)` pair corresponds to which atom.
+
+4. **Output.** A list of `{ atTick, atomType, offset }` entries (`FuelRodReleaseEntry`), in flat-list order. The new PRNG state is threaded back into `SimState`.
+
+**Properties:**
+
+- Pure function of `(fuelMix, currentTick, rodRadius, releaseDuration, prng)`. Same inputs, same output and same returned PRNG state.
+- Total PRNG draws is exactly `2 * total`, regardless of mix composition.
+- If `total === 0`, the function returns an empty schedule and the unchanged PRNG state. (Phase 1 rejects empty-fuel placements before reaching this algorithm; the empty-input return is a defense for callers, not a code path the input loop hits.)
+- Phase 2 (advance fuel rods) consumes the schedule and may skip individual releases that violate spacing — that's a separate algorithm in §10 edge cases, not this one.
+
 ---
 
 ## 3. Atom Types
