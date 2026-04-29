@@ -64,11 +64,12 @@ A player-placed region that absorbs neutrons within its area of effect. Each rod
 A player-placed bundle that introduces new atoms into the playfield. Each fuel rod has:
 - `id`
 - `position` — center point
+- `radius` — area of effect; release offsets fall inside this disk
 - `placedAt` — tick number
 - `releaseSchedule` — array of `{ atTick, atomType, offset }` describing when and where atoms appear
 - `exhausted` — boolean, true once all atoms have been released
 
-Fuel rods are how the player adds fuel to a struggling reaction.
+Fuel rods are how the player adds fuel to a struggling reaction. `radius` is per-instance (mirroring `ControlRod` in §2.3): in v1 every fuel rod uses `actions.fuelRod.radius` from the config at placement time, but the field belongs on the entity so future variants (small fuel cells, oversized salvage rods) can carry their own radius without a spec change.
 
 ---
 
