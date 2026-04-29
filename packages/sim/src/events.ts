@@ -7,6 +7,11 @@ import type {
   RunEndReason,
 } from './types.js';
 
+// Refinement of sim spec §8.1: `neutronExpired` carries a reason so the
+// renderer can differentiate "fizzled" (lifetime) from "left the field"
+// (out-of-bounds). Update the spec doc on the next pass.
+export type NeutronExpirationReason = 'expired' | 'out-of-bounds';
+
 export type SimEvent =
   | {
       readonly type: 'tick';
@@ -30,7 +35,10 @@ export type SimEvent =
   | {
       readonly type: 'neutronExpired';
       readonly tick: number;
-      readonly data: { readonly id: NeutronId };
+      readonly data: {
+        readonly id: NeutronId;
+        readonly reason: NeutronExpirationReason;
+      };
     }
   | {
       readonly type: 'controlRodPlaced';

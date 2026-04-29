@@ -62,5 +62,8 @@
     "basePerTick": 1,
     "edgeMultiplier": 2
   },
+  "playfield": {
+    "bounds": { "minX": -50, "minY": -50, "maxX": 50, "maxY": 50 }
+  },
   "minAtomSpacing": 1.5
 }

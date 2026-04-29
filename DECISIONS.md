@@ -157,3 +157,15 @@ Each entry follows this structure:
   - *Mulberry32 / sfc32 / pcg32* — viable. xorshift32 was picked for minimal code size; if statistical quality becomes an issue (e.g., visible bias in long balance sweeps), upgrading to sfc32 is a localized change behind the same `next()` signature.
   - *`Math.random`* — categorically rejected by ADR-005.
 - **Consequences:** Determinism guarantee from ADR-005 holds across machines because xorshift32 only uses 32-bit integer ops, no `Math.fround`/`Math.random`/floats with platform-dependent precision. PRNG state is part of `SimState` and threaded through every randomness call — no module-level mutable state. If we ever need a second independent stream (e.g., rendering RNG that doesn't perturb sim), we instantiate a second `PRNGState`.
+
+---
+
+## ADR-013: Playfield bounds — centered 100×100 abstract units (default)
+
+- **Date:** 2026-04-28
+- **Decision:** Default playfield is `{ minX: -50, minY: -50, maxX: 50, maxY: 50 }` in sim-space units (~one atom diameter, per spec §12.1). Boundary is inclusive — a neutron exactly at `maxX` is still on the field. Out-of-bounds detection lives in `phaseAdvanceNeutrons` and is the only consumer of `config.playfield.bounds` today. Per-Site overrides will layer on top via the existing `SimConfig` per-Site mechanism (spec §9).
+- **Context:** Sim spec §12.2 left bounds as an open question with the recommendation "configurable per Site, with a default for endless." Phase 3 (advance neutrons) needs concrete bounds to detect out-of-bounds neutrons; we cannot ship the phase without picking a default.
+- **Alternatives:**
+  - *Origin-anchored `(0,0)..(100,100)`* — rejected for sim space. A reactor is symmetric around its center; placing the center at `(0,0)` makes random angles produce balanced distributions and lets per-Site geometry be expressed without offset arithmetic. Renderer maps sim-space → screen-space with one offset+scale, so origin-anchored vs centered makes no difference downstream.
+  - *Larger field (200×200) or non-square aspect* — deferred. 100 abstract units is a reasonable starting density we can grow per Site. We don't yet have benchmarks telling us this is too cramped or too sparse.
+- **Consequences:** Atoms placed at `(0,0)` sit at reactor center, matching the visual model. Boundary check is `position < min || position > max` — strictly inside is `min ≤ position ≤ max`. When Sites land, larger or smaller fields ship as overrides; the default stays. Tie-break for a neutron that both expires and crosses the bound on the same tick: expiration wins (lifetime is the more deterministic property). If we change the tie-break, log a new ADR.

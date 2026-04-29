@@ -4,6 +4,12 @@ Weekly status, two paragraphs max per entry. Forward-looking notes go under "Pla
 
 ---
 
+## 2026-04-28 — Phase 3 (advance neutrons) lands
+
+First real sim logic. Pure motion: `position += velocity` each fixed-rate tick. Neutrons crossing playfield bounds (ADR-013, centered 100×100) are removed and emit `neutronExpired { reason: 'out-of-bounds' }`. Neutrons past `expiresAt` are removed with `reason: 'expired'`. The `reason` field refines sim spec §8.1 — flag for spec doc update on the next pass. Tests cover motion, both removal paths, inclusive boundary, expiration-wins tie-break, determinism over 30 ticks, input-state immutability, no-op when empty, and event append. 10 new tests, all green.
+
+---
+
 ## 2026-04-28 — Scaffolding sprint
 
 Repo is scaffolded. pnpm workspaces with `packages/{sim,game,tools}`; TypeScript strict + project references; ESLint 9 flat config with sim/game/tools boundary rules; Vitest for sim and tools; Vite for game shell; GitHub Actions CI running `pnpm check` (typecheck + lint + test) on every push and PR. Sim core is a 10-phase tick skeleton over plain immutable state, with all entity types, the event union, the input command union, and the `SimConfig` shape from sim-spec.md. Default config file populated with placeholder values consistent with the spec; smoke tests pass on tick advancement, determinism placeholder, and PRNG reproducibility.

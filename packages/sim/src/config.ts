@@ -39,6 +39,14 @@ export type SimConfig = {
     readonly basePerTick: number;
     readonly edgeMultiplier: number;
   };
+  readonly playfield: {
+    readonly bounds: {
+      readonly minX: number;
+      readonly minY: number;
+      readonly maxX: number;
+      readonly maxY: number;
+    };
+  };
   readonly minAtomSpacing: number;
 };
 

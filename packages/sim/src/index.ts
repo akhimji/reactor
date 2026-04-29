@@ -6,7 +6,13 @@ export { advanceTick } from './tick.js';
 
 export type { FuelMix, InputCommand, InputCommandType } from './actions.js';
 export type { AtomBehavior, SimConfig } from './config.js';
-export type { EventEmitter, SimEvent, SimEventHandler, SimEventType } from './events.js';
+export type {
+  EventEmitter,
+  NeutronExpirationReason,
+  SimEvent,
+  SimEventHandler,
+  SimEventType,
+} from './events.js';
 export type { PRNGState } from './prng.js';
 export type { SimState } from './state.js';
 export type {
