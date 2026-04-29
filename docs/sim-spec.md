@@ -47,7 +47,7 @@ A moving particle that triggers atom interactions. Each neutron has:
 - `position` — `{ x, y }`
 - `velocity` — `{ vx, vy }`, magnitude is fixed at spawn (see §6)
 - `spawnedAt` — tick number when created
-- `expiresAt` — tick number when it leaves the playfield or decays
+- `expiresAt` — tick number when this neutron's lifetime ends. Neutrons may be removed earlier for other reasons (leaving the playfield, being absorbed); those removals do not modify `expiresAt`.
 
 Neutrons travel in straight lines until they hit an atom or leave the playfield bounds. They do not collide with each other.
 
@@ -213,7 +213,7 @@ The simulation emits events for the renderer to subscribe to. Events are the onl
 - `atomDecayed` — atom auto-decayed without splitting
 - `neutronSpawned` — new neutron in flight
 - `neutronAbsorbed` — neutron absorbed by atom or control rod
-- `neutronExpired` — neutron left playfield or timed out
+- `neutronExpired` — emitted when a neutron is removed from the simulation. Payload: `{ neutronId, tick, reason: 'expired' | 'out-of-bounds' | 'absorbed' }`.
 - `controlRodPlaced` — player placed a rod
 - `controlRodDepleted` — rod durability reached 0
 - `fuelRodPlaced` — player placed a fuel rod

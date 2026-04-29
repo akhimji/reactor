@@ -7,10 +7,10 @@ import type {
   RunEndReason,
 } from './types.js';
 
-// Refinement of sim spec §8.1: `neutronExpired` carries a reason so the
-// renderer can differentiate "fizzled" (lifetime) from "left the field"
-// (out-of-bounds). Update the spec doc on the next pass.
-export type NeutronExpirationReason = 'expired' | 'out-of-bounds';
+// Spec §8.1: `neutronExpired` carries a reason so the renderer can
+// differentiate lifetime end, leaving the field, and absorption. 'absorbed'
+// is reserved for phases 4/5 (collision resolution) and is not yet emitted.
+export type NeutronExpirationReason = 'expired' | 'out-of-bounds' | 'absorbed';
 
 export type SimEvent =
   | {

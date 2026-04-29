@@ -168,4 +168,28 @@ Each entry follows this structure:
 - **Alternatives:**
   - *Origin-anchored `(0,0)..(100,100)`* — rejected for sim space. A reactor is symmetric around its center; placing the center at `(0,0)` makes random angles produce balanced distributions and lets per-Site geometry be expressed without offset arithmetic. Renderer maps sim-space → screen-space with one offset+scale, so origin-anchored vs centered makes no difference downstream.
   - *Larger field (200×200) or non-square aspect* — deferred. 100 abstract units is a reasonable starting density we can grow per Site. We don't yet have benchmarks telling us this is too cramped or too sparse.
-- **Consequences:** Atoms placed at `(0,0)` sit at reactor center, matching the visual model. Boundary check is `position < min || position > max` — strictly inside is `min ≤ position ≤ max`. When Sites land, larger or smaller fields ship as overrides; the default stays. Tie-break for a neutron that both expires and crosses the bound on the same tick: expiration wins (lifetime is the more deterministic property). If we change the tie-break, log a new ADR.
+- **Consequences:** Atoms placed at `(0,0)` sit at reactor center, matching the visual model. Boundary check is `position < min || position > max` — strictly inside is `min ≤ position ≤ max`. When Sites land, larger or smaller fields ship as overrides; the default stays. Tie-break for a neutron that both expires and crosses the bound on the same tick: expiration wins. Causal priority — a neutron at its lifetime end is definitionally gone; whether it also happens to be out of bounds at that moment is a property of its location, not its existence. Lifetime expiration takes precedence because the neutron ceasing to exist precedes any check about where it is. If we change the tie-break, log a new ADR.
+
+---
+
+## ADR-014: Event schema refinement principle
+
+- **Date:** 2026-04-28
+- **Decision:** Event payloads are part of the spec contract. When implementation reveals an event needs a richer or more typed payload than v1 captured, the change is a spec amendment (sim-spec.md §8) and a new ADR if it changes meaning, not a silent code drift. Code and spec move together.
+- **Context:** Phase 3 implementation revealed `neutronExpired` needed a `reason` field to be useful to the renderer. We added it in code and flagged it for a later spec pass — that lag created a window where code and spec disagreed on the contract. Future phases will surface similar payload questions (e.g., `atomSplit` carrying neutron-spawn data, `runEnded` carrying score/duration). We need a standing rule before that compounds.
+- **Alternatives:**
+  - *Code is the source of truth, spec is best-effort* — rejected. The spec is the contract for the renderer, balance scripts, replays, and any future second renderer. If it drifts, those consumers break in non-obvious ways.
+  - *Freeze event payloads at spec v1, never refine* — rejected. We'd accumulate ad-hoc side channels (state polling, separate event streams) instead of evolving the schema cleanly.
+- **Consequences:** Adding or changing a field on any `SimEvent` variant requires (a) the spec change in §8, (b) a brief ADR if semantics changed, (c) the type change in `events.ts`, and (d) renderer/test updates. Slight friction on each event change, but consumers can rely on the spec.
+
+---
+
+## ADR-015: State field semantics — fields have one meaning
+
+- **Date:** 2026-04-28
+- **Decision:** Every field on a sim entity has exactly one meaning. State changes happen through dedicated operations and dedicated fields, never by overloading an existing field with a second meaning. `Neutron.expiresAt` is the canonical example: it means "tick when this neutron's lifetime ends," and removal for any other reason (out-of-bounds, absorption) does not write to `expiresAt`.
+- **Context:** Phase 3 surfaced the question of whether out-of-bounds removal should set `expiresAt = currentTick` to mark the neutron as gone. That would conflate two distinct facts ("when does its lifetime end" and "when did we remove it") into one field. The right model is: lifetime end is a property; removal for other reasons is an operation that filters the entity out of state without touching properties.
+- **Alternatives:**
+  - *Overload fields for compactness* — rejected. Saves a field at the cost of every reader having to know the overload. Bug magnet, especially when entities are inspected mid-pipeline.
+  - *Add a separate `removedAt` / `removalReason` field on every entity* — rejected for v1. Removed entities are filtered out of state in the same tick; we don't keep removed entities around to inspect. The reason travels in the event payload (ADR-014), which is the right channel.
+- **Consequences:** Future entity field design starts from "what does this field mean?" If you want to express two things, that's two fields or a separate operation. Any future field that looks like it's serving multiple purposes is a smell — flag it in review. Applies to atoms (`state`, `excitedSince`, `decaysAt` are each one fact), control rods (`durability`), and fuel rods (`exhausted`).
