@@ -4,6 +4,8 @@ import type { SimEvent } from './events.js';
 import { next, type PRNGState } from './prng.js';
 import type { SimState } from './state.js';
 import type {
+  Atom,
+  AtomId,
   AtomType,
   ControlRod,
   ControlRodId,
@@ -249,9 +251,122 @@ function generateReleaseSchedule(
   return { schedule, nextPrng: p };
 }
 
-// §4.1.2
-function phaseAdvanceFuelRods(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.2 — release scheduled atoms from each fuel rod whose entries fire this
+// tick. If a release would violate `minAtomSpacing`, try up to 8 evenly-spaced
+// offset candidates at distance `minAtomSpacing` (rotation seeded from the
+// PRNG for determinism). If none lands in a valid spot inside the rod radius,
+// skip the release silently per spec §10. Rods are marked exhausted once all
+// schedule entries have fired (or were skipped) — exhausted rods remain in
+// state until phase 7 cleanup (out of scope for this session).
+function phaseAdvanceFuelRods(state: SimState, config: SimConfig): SimState {
+  if (state.fuelRods.size === 0) return state;
+
+  const minSpacing = config.minAtomSpacing;
+  const rodRadius = config.actions.fuelRod.radius;
+
+  let atoms: ReadonlyMap<AtomId, Atom> = state.atoms;
+  let prng = state.prng;
+  let nextEntityId = state.nextEntityId;
+  const newEvents: SimEvent[] = [];
+  const updatedRods = new Map<FuelRodId, FuelRod>();
+  let mutated = false;
+
+  for (const [rodId, rod] of state.fuelRods) {
+    if (rod.exhausted) {
+      updatedRods.set(rodId, rod);
+      continue;
+    }
+
+    let rodAtomsAdded = 0;
+
+    for (const entry of rod.releaseSchedule) {
+      if (entry.atTick !== state.tick) continue;
+
+      const desired: Vec2 = {
+        x: rod.position.x + entry.offset.x,
+        y: rod.position.y + entry.offset.y,
+      };
+
+      let position: Vec2 | null = null;
+      if (!violatesSpacing(desired, atoms, minSpacing)) {
+        position = desired;
+      } else {
+        const [angleSeed, p1] = next(prng);
+        prng = p1;
+        const baseAngle = angleSeed * 2 * Math.PI;
+        for (let i = 0; i < 8; i++) {
+          const a = baseAngle + (i * Math.PI * 2) / 8;
+          const candidate: Vec2 = {
+            x: desired.x + Math.cos(a) * minSpacing,
+            y: desired.y + Math.sin(a) * minSpacing,
+          };
+          const dx = candidate.x - rod.position.x;
+          const dy = candidate.y - rod.position.y;
+          if (Math.hypot(dx, dy) > rodRadius) continue;
+          if (!violatesSpacing(candidate, atoms, minSpacing)) {
+            position = candidate;
+            break;
+          }
+        }
+      }
+
+      if (position === null) continue;
+
+      const atomId = nextEntityId as AtomId;
+      nextEntityId += 1;
+      const decayTicks = config.atoms[entry.atomType].decayTicks;
+      const atom: Atom = {
+        id: atomId,
+        position,
+        type: entry.atomType,
+        state: 'intact',
+        excitedSince: null,
+        decaysAt: decayTicks === null ? null : state.tick + decayTicks,
+      };
+      const nextAtoms = new Map(atoms);
+      nextAtoms.set(atomId, atom);
+      atoms = nextAtoms;
+      rodAtomsAdded += 1;
+      newEvents.push({ type: 'atomSpawned', tick: state.tick, data: { id: atomId } });
+    }
+
+    const allReleased = rod.releaseSchedule.every((e) => e.atTick <= state.tick);
+    if (allReleased && !rod.exhausted) {
+      updatedRods.set(rodId, { ...rod, exhausted: true });
+      newEvents.push({ type: 'fuelRodExhausted', tick: state.tick, data: { id: rodId } });
+      mutated = true;
+    } else if (rodAtomsAdded > 0) {
+      updatedRods.set(rodId, rod);
+      mutated = true;
+    } else {
+      updatedRods.set(rodId, rod);
+    }
+  }
+
+  if (!mutated && newEvents.length === 0) return state;
+
+  return {
+    ...state,
+    atoms,
+    fuelRods: updatedRods,
+    prng,
+    nextEntityId,
+    pendingEvents:
+      newEvents.length > 0 ? [...state.pendingEvents, ...newEvents] : state.pendingEvents,
+  };
+}
+
+function violatesSpacing(
+  position: Vec2,
+  atoms: ReadonlyMap<AtomId, Atom>,
+  minSpacing: number,
+): boolean {
+  for (const a of atoms.values()) {
+    const dx = a.position.x - position.x;
+    const dy = a.position.y - position.y;
+    if (Math.hypot(dx, dy) < minSpacing) return true;
+  }
+  return false;
 }
 
 // §4.1.3 — neutrons travel in straight lines at fixed velocity (spec §2.2).
