@@ -28,6 +28,15 @@ export type SimConfig = {
       readonly radius: number;
       readonly durability: number;
       readonly absorbStrength: number;
+      readonly inventoryDefault: number;
+    };
+    readonly fuelRod: {
+      readonly radius: number;
+      readonly releaseDuration: number;
+      readonly inventoryDefault: number;
+    };
+    readonly scram: {
+      readonly availableDefault: boolean;
     };
   };
   readonly endConditions: {

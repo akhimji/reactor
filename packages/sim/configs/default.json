@@ -50,7 +50,16 @@
     "controlRod": {
       "radius": 30,
       "durability": 50,
-      "absorbStrength": 0.7
+      "absorbStrength": 0.7,
+      "inventoryDefault": 3
+    },
+    "fuelRod": {
+      "radius": 8,
+      "releaseDuration": 120,
+      "inventoryDefault": 3
+    },
+    "scram": {
+      "availableDefault": true
     }
   },
   "endConditions": {
