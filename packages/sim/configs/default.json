@@ -38,6 +38,10 @@
     "defaultSpeed": 4,
     "lifetimeTicks": 600
   },
+  "physics": {
+    "splittingDuration": 4,
+    "neutronReleaseJitter": 0.4
+  },
   "criticality": {
     "baselineNeutronRate": 8,
     "zoneBoundaries": {

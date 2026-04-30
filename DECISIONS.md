@@ -316,3 +316,26 @@ Each entry follows this structure:
   - *Pre-broadphase by axis-aligned bounding box (AABB)* — rejected. Reasonable for static geometry but neutrons are short-lived and atoms outnumber them less than 1:3 in v1; the AABB pre-pass cost approaches the brute-force cost itself.
   - *Inline the collision logic inside `phaseResolveCollisions` instead of a separate file* — rejected. Mixing detection (geometry) with resolution (rules + PRNG) in one function makes both harder to test in isolation. The interface boundary is cheap to maintain and pays for itself in test clarity.
 - **Consequences:** Same pattern as ADR-008 (object pooling deferred): pay the simplest cost now, capture the swap point in the interface, optimize when profiling justifies it. The trigger for revisiting is the same as the planned-milestones "neutron storage refactor" trigger — either real workloads start dropping ticks at the v1 perf gate, or an order-of-magnitude entity scaleup (post-v1 Sites with 1000+ atoms) makes brute force untenable. Until then, `collisions.ts` stays under 100 lines and any future spatial structure (e.g., a `SpatialIndex` class with `query(neutron)` and `update(atom)`) sits behind the same `findNeutronAtomCollisions` signature. Phase 4 itself is unaffected by the swap.
+
+---
+
+## ADR-025: Neutron release angle algorithm — evenly-distributed-with-jitter
+
+- **Date:** 2026-04-29
+- **Decision:** Phase 5 spawns neutrons from a splitting atom using evenly-distributed-with-jitter angles. For a split releasing `N` neutrons:
+  ```
+  [baseOffset, prng] = next(prng)         // single PRNG draw, scaled to [0, 2π)
+  for i in 0..N-1:
+    evenAngle = baseOffset + (i / N) * 2π
+    [u, prng] = next(prng)
+    jitter = (u - 0.5) * jitterMagnitude  // range [-jitterMagnitude/2, +jitterMagnitude/2)
+    angle_i = evenAngle + jitter
+  ```
+  Total PRNG draws per split: `N + 1`. The first draw seeds the rotation of the even pattern; each subsequent draw perturbs one neutron. Draw count is part of the determinism contract — tests assert it. `jitterMagnitude` is a config value `physics.neutronReleaseJitter`, default `0.4` radians (~23°).
+- **Context:** Phase 5 must turn `pendingNeutrons: N` into N neutron velocity vectors. The angle distribution shapes how the player perceives a split: pure uniform random (each angle independent in [0, 2π)) clusters at small N — three random angles often land within 60° of each other, which reads to the player as "the split was bugged, neutrons all went the same way." Pure even distribution (N points equally spaced around the circle) reads as "robotic" and visually identical between splits at the same N. We need a single rule that produces explosive-but-covering distributions and is cheap to compute.
+- **Alternatives:**
+  - *Uniform random per-neutron (`angle = next(prng) * 2π`, N draws total)* — rejected. Cheaper by one draw but the clustering problem is real at N=2 and N=3, which is the dominant case (U235 is `[2,3]`, U238 is `[2,2]`, Pu239 is `[2,4]`). The whole point of a split is that neutrons fly outward in different directions; clustering defeats the gameplay.
+  - *Pure even distribution, no jitter (`angle_i = baseOffset + (i/N) * 2π`, 1 draw total)* — rejected. Visually too regular. A U235 atom always splitting into 3 perfectly 120°-spaced neutrons makes consecutive U235 splits look identical, which dampens the sense of explosive variety. Real fission isn't this orderly even at human scales.
+  - *Jitter applied to even distribution by perturbing the index angle directly without a base rotation* — rejected. Without `baseOffset`, the first neutron of every U235 split would always go roughly east. The base rotation per split is what makes splits feel uncorrelated to each other.
+  - *Continuous Poisson disc sampling on the circle* — overkill. The N+1 draw rule is cheap and gives essentially the same player perception. Reserve sophisticated sampling for visual effects systems (renderer concern), not sim physics.
+- **Consequences:** PRNG draw budget for phase 5 per atom split is exactly `N + 1` — assertable in tests, predictable in determinism replays. `jitterMagnitude = 0.4` radians is a starting point; it puts each neutron within roughly ±11.5° of its evenly-spaced slot, which preserves the "covering the circle" property while breaking the visual regularity. If playtesting reveals jitter is too tight (looks robotic) or too loose (loses coverage), the value tunes via config without code changes — the algorithm itself is fixed by this ADR. The jitter is symmetric around zero by construction (`(u - 0.5) * jitter`), so over many splits the angular distribution is unbiased. Real physics doesn't constrain us here — neutron emission angles in a real fission reactor have nothing to do with this game's sim — but game feel does, and even-with-jitter is the shape that matches player expectation of "explosive but full coverage."
