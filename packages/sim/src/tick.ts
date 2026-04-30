@@ -699,9 +699,120 @@ function sortPairsBySpawnOrder(
   return copy;
 }
 
-// §4.1.5
-function phaseApplyCollisions(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.5 — apply collision results.
+//
+// For every atom in `excited` state (set by phase 4 on a split outcome): spawn
+// `pendingNeutrons` neutrons at angles computed by ADR-025's
+// evenly-distributed-with-jitter algorithm, position-offset from the parent's
+// center per ADR-026, then transition the atom to `splitting` and record
+// `splittingStartedAt` for phase 6 to consume.
+//
+// Same-tick deferral: atoms that became `excited` in the current tick (i.e.
+// `excitedSince === state.tick`) are skipped. They will be processed by
+// phase 5 on the next tick. This matches ADR-023's "Duration in excited is
+// exactly 1 tick" — the atom is observable in `excited` state for one tick
+// (the tick phase 4 set it) so the renderer can play a buildup animation
+// before particles spawn. Same family of rule as ADR-016 for neutrons.
+//
+// Determinism contract (ADR-025): exactly N+1 PRNG draws per split where N is
+// pendingNeutrons. The first draw seeds the rotation of the even pattern;
+// each subsequent draw perturbs one neutron's angle.
+//
+// Phase 5 does not emit `atomSplit` — that fired in phase 4 when the split
+// was committed. Phase 5 is the mechanical follow-through.
+function phaseApplyCollisions(state: SimState, config: SimConfig): SimState {
+  let hasReady = false;
+  for (const atom of state.atoms.values()) {
+    if (atom.state === 'excited' && atom.excitedSince !== null && atom.excitedSince < state.tick) {
+      hasReady = true;
+      break;
+    }
+  }
+  if (!hasReady) return state;
+
+  const speed = config.neutron.defaultSpeed;
+  const lifetime = config.neutron.lifetimeTicks;
+  const jitter = config.physics.neutronReleaseJitter;
+
+  let atoms = state.atoms;
+  let neutrons = state.neutrons;
+  let prng = state.prng;
+  let nextEntityId = state.nextEntityId;
+  const newEvents: SimEvent[] = [];
+
+  // Map iteration is insertion-order (atoms inserted in deterministic order
+  // by phase 2), so this loop is deterministic.
+  for (const [atomId, atom] of state.atoms) {
+    if (atom.state !== 'excited') continue;
+    if (atom.excitedSince === null || atom.excitedSince >= state.tick) continue;
+
+    const n = atom.pendingNeutrons ?? 0;
+
+    // Single PRNG draw for the rotation seed regardless of N. Per ADR-025 the
+    // budget is N + 1 draws; this is the +1.
+    const [u0, p0] = next(prng);
+    prng = p0;
+    const baseOffset = u0 * 2 * Math.PI;
+
+    const nextNeutrons = new Map(neutrons);
+    for (let i = 0; i < n; i++) {
+      const evenAngle = baseOffset + ((i / n) * 2 * Math.PI);
+      const [uj, pj] = next(prng);
+      prng = pj;
+      const angle = evenAngle + (uj - 0.5) * jitter;
+
+      const dx = Math.cos(angle);
+      const dy = Math.sin(angle);
+      const offset = atom.collisionRadius + 0.01;
+      const position: Vec2 = {
+        x: atom.position.x + dx * offset,
+        y: atom.position.y + dy * offset,
+      };
+      const velocity = { vx: dx * speed, vy: dy * speed };
+
+      const id = nextEntityId as NeutronId;
+      nextEntityId += 1;
+      const neutron: Neutron = {
+        id,
+        position,
+        velocity,
+        spawnedAt: state.tick,
+        expiresAt: state.tick + lifetime,
+      };
+      nextNeutrons.set(id, neutron);
+
+      newEvents.push({
+        type: 'neutronSpawned',
+        tick: state.tick,
+        data: { neutronId: id, position, velocity },
+      });
+    }
+    neutrons = nextNeutrons;
+
+    // Spread without `pendingNeutrons` to drop it (exactOptionalPropertyTypes
+    // forbids assigning `undefined` to an optional `number?`). Same below for
+    // `splittingStartedAt` in phase 6.
+    const { pendingNeutrons: _drop, ...rest } = atom;
+    void _drop;
+    const updatedAtom: Atom = {
+      ...rest,
+      state: 'splitting',
+      splittingStartedAt: state.tick,
+    };
+    const nextAtoms = new Map(atoms);
+    nextAtoms.set(atomId, updatedAtom);
+    atoms = nextAtoms;
+  }
+
+  return {
+    ...state,
+    atoms,
+    neutrons,
+    prng,
+    nextEntityId,
+    pendingEvents:
+      newEvents.length > 0 ? [...state.pendingEvents, ...newEvents] : state.pendingEvents,
+  };
 }
 
 // §4.1.6

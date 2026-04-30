@@ -151,9 +151,11 @@ This order is not negotiable. Changing it changes determinism.
 
 #### 4.1.5 Apply collision results
 
-For each atom in `excited` state: transition to `splitting`, spawn `pendingNeutrons` count of neutrons at the atom's position with evenly-distributed-with-jitter angles (algorithm in ADR-025), clear `pendingNeutrons` and set `splittingStartedAt = currentTick`. Phase 5 also handles any post-collision atom finalization (see ADR-023).
+For each atom in `excited` state where `excitedSince < currentTick` (i.e. the atom became excited on a prior tick): transition to `splitting`, spawn `pendingNeutrons` count of neutrons at the atom's position with evenly-distributed-with-jitter angles (algorithm in ADR-025), clear `pendingNeutrons` and set `splittingStartedAt = currentTick`. Phase 5 also handles any post-collision atom finalization (see ADR-023).
 
-The `excited → splitting` transition is owned exclusively by phase 5. Phase 4 (resolve collisions) is responsible for the prior `intact → excited` transition; phase 6 owns subsequent transitions out of `splitting`. Neutron spawn position is offset from the parent atom's center per ADR-026; spawned neutrons are deferred to the next tick per ADR-016. Phase 5 emits one `neutronSpawned` event per neutron; it does not re-emit `atomSplit` (that fired in phase 4 when the split was committed).
+Same-tick deferral: atoms whose `excitedSince === currentTick` (set by phase 4 in the same tick) are skipped. They become eligible for phase 5 on the next tick. This preserves ADR-023's "Duration in excited is exactly 1 tick" — the atom is observable in `excited` state for one tick before particles spawn, giving the renderer a frame to play a buildup animation. Same rule family as ADR-016 (neutron same-tick deferral).
+
+The `excited → splitting` transition is owned exclusively by phase 5. Phase 4 (resolve collisions) is responsible for the prior `intact → excited` transition; phase 6 owns subsequent transitions out of `splitting`. Neutron spawn position is offset from the parent atom's center per ADR-026; spawned neutrons inherit ADR-016 same-tick deferral. Phase 5 emits one `neutronSpawned` event per spawned neutron; it does not re-emit `atomSplit` (that fired in phase 4 when the split was committed).
 
 `splittingStartedAt` is the tick when the atom entered `splitting`, populated here by phase 5 and consumed by phase 6 to decide when `splittingDuration` has elapsed. The field is defined on `Atom` (§2.1).
 
