@@ -38,6 +38,7 @@ A stationary fissile or non-fissile particle on the playfield. Each atom has:
 - `state` — one of `intact`, `excited`, `splitting`, `spent`
 - `excitedSince` — tick number when entered `excited` state, or null
 - `decaysAt` — tick number when this atom auto-decays, or null
+- `splittingStartedAt` — tick number when entered `splitting` state, or undefined. Populated by phase 5 (§4.1.5) on the `excited → splitting` transition; consumed by phase 6 (§4.1.6) to decide when `splittingDuration` has elapsed; cleared on transition to `spent`.
 
 Atoms do not move. Atoms transition between states based on neutron interactions and time.
 
@@ -139,14 +140,28 @@ Each tick executes in this exact order:
 2. **Advance fuel rod schedules** — release any atoms scheduled for this tick
 3. **Advance neutrons** — move each neutron by its velocity vector
 4. **Resolve collisions** — for each neutron, check against atoms and control rods
-5. **Apply collision results** — update atom states, spawn new neutrons, decrement rod durability
-6. **Advance atom states** — handle state transitions (`splitting` → `spent`, `excited` → `intact` if no follow-up)
+5. **Apply collision results** — see §4.1.5
+6. **Advance atom states** — see §4.1.6
 7. **Advance auto-decay** — atoms past their `decaysAt` decay; spent atoms past cleanup threshold are removed
 8. **Recompute criticality** — derive criticality factor from current population (§5)
 9. **Check end conditions** — meltdown, extinction, objective met
 10. **Emit events** — flush queued events to subscribers
 
 This order is not negotiable. Changing it changes determinism.
+
+#### 4.1.5 Apply collision results
+
+For each atom in `excited` state: transition to `splitting`, spawn `pendingNeutrons` count of neutrons at the atom's position with evenly-distributed-with-jitter angles (algorithm in ADR-025), clear `pendingNeutrons` and set `splittingStartedAt = currentTick`. Phase 5 also handles any post-collision atom finalization (see ADR-023).
+
+The `excited → splitting` transition is owned exclusively by phase 5. Phase 4 (resolve collisions) is responsible for the prior `intact → excited` transition; phase 6 owns subsequent transitions out of `splitting`. Neutron spawn position is offset from the parent atom's center per ADR-026; spawned neutrons are deferred to the next tick per ADR-016. Phase 5 emits one `neutronSpawned` event per neutron; it does not re-emit `atomSplit` (that fired in phase 4 when the split was committed).
+
+`splittingStartedAt` is the tick when the atom entered `splitting`, populated here by phase 5 and consumed by phase 6 to decide when `splittingDuration` has elapsed. The field is defined on `Atom` (§2.1).
+
+#### 4.1.6 Advance atom states
+
+For each atom in `splitting` state: if `currentTick - splittingStartedAt >= splittingDuration`, transition to `spent`, clear `splittingStartedAt`, and emit `atomSpent`. Phase 6 also handles any other timer-based atom state transitions in future versions.
+
+Phase 6 does not own `excited → splitting` (that is phase 5) and does not own `intact → spent` (that is phase 4 for absorption and phase 7 for auto-decay). Phase 6 has no PRNG draws; transitions are pure timer-based comparisons against the atom's recorded `splittingStartedAt`.
 
 ### 4.2 Determinism
 - All randomness uses a single seeded PRNG threaded through the sim.
