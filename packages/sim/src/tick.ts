@@ -878,9 +878,79 @@ function phaseAdvanceAtomStates(state: SimState, config: SimConfig): SimState {
   };
 }
 
-// §4.1.7
-function phaseAutoDecay(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.7 — auto-decay.
+//
+// Two distinct paths (ADR-027, ADR-028):
+//
+//  1. Pu239 timer-driven decay. Atoms whose `decaysAt` tick has been reached
+//     while still `intact` are removed from state and emit `atomDecayed`. They
+//     bypass the `spent` state entirely — gameplay-wise these atoms timed out
+//     unused, which is a different signal from "atom got consumed."
+//
+//  2. Spent atom cleanup. Atoms in `spent` state whose `spentAt` is at least
+//     `spentAtomCleanupTicks` ticks ago are removed from state. No event is
+//     emitted on cleanup — the prior `atomSpent` (or `atomDecayed`) already
+//     reported the logical end-of-life.
+//
+// Atoms in `excited` or `splitting` state at decay time are NOT decayed by
+// this phase: the state machine takes priority over the timer (ADR-023). Once
+// such an atom finishes its split, it transitions to `spent` and the cleanup
+// path applies normally.
+//
+// Atoms in `spent` state with `spentAt === undefined` indicate a bug (a phase
+// transitioned the atom to `spent` without populating spentAt). Phase 7 leaves
+// these atoms alone rather than crashing — they will linger in state until
+// fixed at the source.
+//
+// No PRNG draws; deterministic timer-based logic only.
+function phaseAutoDecay(state: SimState, config: SimConfig): SimState {
+  if (state.atoms.size === 0) return state;
+
+  const cleanupTicks = config.physics.spentAtomCleanupTicks;
+  let atoms = state.atoms;
+  const newEvents: SimEvent[] = [];
+  let mutated = false;
+
+  for (const [atomId, atom] of state.atoms) {
+    // Path 1: Pu239 timer-driven decay (only intact atoms with a decaysAt set).
+    if (
+      atom.state === 'intact' &&
+      atom.decaysAt !== null &&
+      state.tick >= atom.decaysAt
+    ) {
+      const nextAtoms = new Map(atoms);
+      nextAtoms.delete(atomId);
+      atoms = nextAtoms;
+      mutated = true;
+      newEvents.push({
+        type: 'atomDecayed',
+        tick: state.tick,
+        data: { atomId, type: atom.type, position: atom.position },
+      });
+      continue;
+    }
+
+    // Path 2: spent atom cleanup.
+    if (
+      atom.state === 'spent' &&
+      atom.spentAt !== undefined &&
+      state.tick - atom.spentAt >= cleanupTicks
+    ) {
+      const nextAtoms = new Map(atoms);
+      nextAtoms.delete(atomId);
+      atoms = nextAtoms;
+      mutated = true;
+    }
+  }
+
+  if (!mutated) return state;
+
+  return {
+    ...state,
+    atoms,
+    pendingEvents:
+      newEvents.length > 0 ? [...state.pendingEvents, ...newEvents] : state.pendingEvents,
+  };
 }
 
 // §4.1.8
