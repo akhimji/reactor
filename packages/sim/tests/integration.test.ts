@@ -203,3 +203,111 @@ describe('integration: full U235 split lifecycle', () => {
     expect(run()).toEqual(run());
   });
 });
+
+describe('integration: Pu239 decays unused after timer', () => {
+  it('Pu239 with no neutron interaction decays at decayTicks; atom removed immediately', () => {
+    const cfg = loadConfig(defaultConfig);
+    const decayTicks = cfg.atoms.Pu239.decayTicks!;
+    const pu239: Atom = {
+      id: aid(1),
+      position: { x: 0, y: 0 },
+      type: 'Pu239',
+      state: 'intact',
+      excitedSince: null,
+      // Spawn at tick 0; decaysAt = decayTicks (matches phase 2 convention).
+      decaysAt: decayTicks,
+      collisionRadius: cfg.atom.collisionRadius,
+    };
+    let state = withInitialAtom(createSimState(42, cfg), pu239);
+
+    // Advance to one tick before decay. Atom should still be intact, no event.
+    for (let t = 1; t < decayTicks; t++) {
+      state = advanceTick(state, [], cfg);
+    }
+    expect(state.tick).toBe(decayTicks - 1);
+    expect(state.atoms.has(aid(1))).toBe(true);
+    expect(state.atoms.get(aid(1))?.state).toBe('intact');
+    expect(findAll(state.pendingEvents, 'atomDecayed')).toHaveLength(0);
+
+    // One more tick → state.tick === decayTicks; phase 7 fires.
+    state = advanceTick(state, [], cfg);
+    expect(state.tick).toBe(decayTicks);
+    expect(state.atoms.has(aid(1))).toBe(false);
+    const decayed = findAll(state.pendingEvents, 'atomDecayed');
+    expect(decayed).toHaveLength(1);
+    expect(decayed[0]!.tick).toBe(decayTicks);
+    expect(decayed[0]!.data.atomId).toBe(aid(1));
+    expect(decayed[0]!.data.type).toBe('Pu239');
+
+    // No further events related to this atom on subsequent ticks.
+    const eventsBeforeIdle = state.pendingEvents.length;
+    for (let i = 0; i < 5; i++) state = advanceTick(state, [], cfg);
+    expect(state.pendingEvents.length).toBe(eventsBeforeIdle);
+  });
+});
+
+describe('integration: spent atom cleanup after fission', () => {
+  it('atom removed exactly spentAtomCleanupTicks after spentAt', () => {
+    const cfg = withForcedU235Split();
+    const cleanupTicks = cfg.physics.spentAtomCleanupTicks;
+    const splittingDuration = cfg.physics.splittingDuration;
+    const u235: Atom = {
+      id: aid(1),
+      position: { x: 0, y: 0 },
+      type: 'U235',
+      state: 'intact',
+      excitedSince: null,
+      decaysAt: null,
+      collisionRadius: cfg.atom.collisionRadius,
+    };
+    let state = withInitialAtom(createSimState(42, cfg), u235);
+
+    // T+1: inject neutron (deferred this tick).
+    state = advanceTick(
+      state,
+      [
+        {
+          type: 'injectNeutron',
+          position: { x: -2, y: 0 },
+          direction: { x: 1, y: 0 },
+        },
+      ],
+      cfg,
+    );
+    // T+2: collision → excited.
+    state = advanceTick(state, [], cfg);
+    // T+3: phase 5 → splitting.
+    state = advanceTick(state, [], cfg);
+    expect(state.atoms.get(aid(1))?.state).toBe('splitting');
+
+    // Run splittingDuration more ticks to land on spent.
+    for (let i = 0; i < splittingDuration; i++) {
+      state = advanceTick(state, [], cfg);
+    }
+    expect(state.tick).toBe(3 + splittingDuration);
+    const spent = state.atoms.get(aid(1))!;
+    expect(spent.state).toBe('spent');
+    expect(spent.spentAt).toBe(state.tick);
+    const spentAt = spent.spentAt!;
+
+    // Run until just before cleanup.
+    while (state.tick < spentAt + cleanupTicks - 1) {
+      state = advanceTick(state, [], cfg);
+    }
+    expect(state.atoms.has(aid(1))).toBe(true);
+
+    // One more tick lands on the cleanup boundary: state.tick - spentAt === cleanupTicks.
+    state = advanceTick(state, [], cfg);
+    expect(state.tick - spentAt).toBe(cleanupTicks);
+    expect(state.atoms.has(aid(1))).toBe(false);
+
+    // No event fires for cleanup itself — only the prior atomSpent.
+    const cleanupTickEvents = state.pendingEvents.filter((e) => e.tick === state.tick);
+    // Stale neutron expirations may fire, but no atom-related events for this atom.
+    for (const ev of cleanupTickEvents) {
+      if ('atomId' in ev.data) {
+        expect(ev.data.atomId).not.toBe(aid(1));
+      }
+    }
+  });
+});
