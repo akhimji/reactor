@@ -198,6 +198,7 @@ describe('phase 4: resolve collisions — outcome resolution', () => {
 
     const s1 = advanceTick(initial, [], cfg);
     expect(s1.atoms.get(aid(10))?.state).toBe('spent');
+    expect(s1.atoms.get(aid(10))?.spentAt).toBe(s1.tick);
     expect(s1.neutrons.has(nid(1))).toBe(false);
 
     expect(findAll(s1.pendingEvents, 'atomSpent')).toHaveLength(1);

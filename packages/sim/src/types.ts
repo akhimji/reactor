@@ -28,6 +28,11 @@ export type Atom = {
   // to decide when `splittingDuration` ticks have elapsed and the atom should
   // transition to `spent`. Cleared on transition to `spent`. Spec §4.1.5/§4.1.6.
   readonly splittingStartedAt?: number;
+  // Set by whichever phase transitions the atom to `spent` (phase 4 absorb or
+  // phase 6 splitting → spent). Read by phase 7 to gate cleanup once
+  // `spentAtomCleanupTicks` have elapsed (ADR-027). NOT populated by phase 7's
+  // auto-decay path — that path skips `spent` entirely (ADR-028).
+  readonly spentAt?: number;
 };
 
 export type Neutron = {

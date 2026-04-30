@@ -26,6 +26,10 @@ export type SimConfig = {
     // Maximum jitter (radians) applied to evenly-spaced neutron release angles
     // in phase 5. ADR-025 — the algorithm is fixed; this value tunes feel.
     readonly neutronReleaseJitter: number;
+    // Ticks an atom remains in `spent` state before phase 7 removes it from
+    // state (ADR-027). Atoms transitioning via Pu239 auto-decay are removed
+    // immediately and bypass this window (ADR-028).
+    readonly spentAtomCleanupTicks: number;
   };
   readonly criticality: {
     readonly baselineNeutronRate: number;

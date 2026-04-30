@@ -40,7 +40,8 @@
   },
   "physics": {
     "splittingDuration": 4,
-    "neutronReleaseJitter": 0.4
+    "neutronReleaseJitter": 0.4,
+    "spentAtomCleanupTicks": 60
   },
   "criticality": {
     "baselineNeutronRate": 8,

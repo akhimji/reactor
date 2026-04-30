@@ -139,7 +139,7 @@ describe('phase 6: advance atom states — state transitions', () => {
 });
 
 describe('phase 6: advance atom states — field clearing', () => {
-  it('after transition, splittingStartedAt is undefined', () => {
+  it('after transition, splittingStartedAt is undefined and spentAt is set', () => {
     const dur = baseConfig.physics.splittingDuration;
     const initial = withInitialAtoms(
       createSimState(1, baseConfig),
@@ -151,6 +151,7 @@ describe('phase 6: advance atom states — field clearing', () => {
     const atom = s1.atoms.get(aid(10))!;
     expect(atom.state).toBe('spent');
     expect(atom.splittingStartedAt).toBeUndefined();
+    expect(atom.spentAt).toBe(s1.tick);
   });
 });
 

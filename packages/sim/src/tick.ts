@@ -568,7 +568,7 @@ function phaseResolveCollisions(state: SimState, config: SimConfig): SimState {
         const isImmortal = atom.type === 'B10';
 
         if (!isImmortal) {
-          const updatedAtom: Atom = { ...atom, state: 'spent' };
+          const updatedAtom: Atom = { ...atom, state: 'spent', spentAt: state.tick };
           const nextAtoms = new Map(atoms);
           nextAtoms.set(atom.id, updatedAtom);
           atoms = nextAtoms;
@@ -855,7 +855,7 @@ function phaseAdvanceAtomStates(state: SimState, config: SimConfig): SimState {
 
     const { splittingStartedAt: _drop, ...rest } = atom;
     void _drop;
-    const updatedAtom: Atom = { ...rest, state: 'spent' };
+    const updatedAtom: Atom = { ...rest, state: 'spent', spentAt: state.tick };
     const nextAtoms = new Map(atoms);
     nextAtoms.set(atomId, updatedAtom);
     atoms = nextAtoms;
