@@ -1,6 +1,9 @@
 {
   "tickHz": 60,
   "criticalityWindow": 120,
+  "atom": {
+    "collisionRadius": 1.0
+  },
   "atoms": {
     "U235": {
       "splitChance": 0.85,

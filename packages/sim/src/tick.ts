@@ -340,6 +340,7 @@ function phaseAdvanceFuelRods(state: SimState, config: SimConfig): SimState {
         state: 'intact',
         excitedSince: null,
         decaysAt: decayTicks === null ? null : state.tick + decayTicks,
+        collisionRadius: config.atom.collisionRadius,
       };
       const nextAtoms = new Map(atoms);
       nextAtoms.set(atomId, atom);

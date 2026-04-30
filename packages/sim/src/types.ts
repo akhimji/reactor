@@ -15,6 +15,15 @@ export type Atom = {
   readonly state: AtomState;
   readonly excitedSince: number | null;
   readonly decaysAt: number | null;
+  // Per-instance collision radius, mirroring FuelRod.radius (ADR-015 / spec §2.4).
+  // In v1 every atom uses config.atom.collisionRadius at spawn time, but the
+  // field belongs on the entity so future variants can carry their own radius.
+  readonly collisionRadius: number;
+  // Set by phase 4 when this atom enters `excited`: the count of neutrons to
+  // spawn when phase 5 reads it on the `excited → splitting` transition. ADR-023
+  // explains why the count is decided in phase 4 (atomSplit event payload) but
+  // consumed by phase 5 (actual neutron spawn).
+  readonly pendingNeutrons?: number;
 };
 
 export type Neutron = {

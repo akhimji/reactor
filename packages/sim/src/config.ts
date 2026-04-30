@@ -11,6 +11,9 @@ export type AtomBehavior = {
 export type SimConfig = {
   readonly tickHz: number;
   readonly criticalityWindow: number;
+  readonly atom: {
+    readonly collisionRadius: number;
+  };
   readonly atoms: { readonly [K in AtomType]: AtomBehavior };
   readonly neutron: {
     readonly defaultSpeed: number;

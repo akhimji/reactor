@@ -40,6 +40,7 @@ function makeAtom(id: number, x: number, y: number): Atom {
     state: 'intact',
     excitedSince: null,
     decaysAt: null,
+    collisionRadius: config.atom.collisionRadius,
   };
 }
 
