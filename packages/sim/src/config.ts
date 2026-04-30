@@ -19,6 +19,14 @@ export type SimConfig = {
     readonly defaultSpeed: number;
     readonly lifetimeTicks: number;
   };
+  readonly physics: {
+    // Ticks an atom remains in `splitting` state before transitioning to `spent`.
+    // Phase 6 (§4.1.6) gates this transition.
+    readonly splittingDuration: number;
+    // Maximum jitter (radians) applied to evenly-spaced neutron release angles
+    // in phase 5. ADR-025 — the algorithm is fixed; this value tunes feel.
+    readonly neutronReleaseJitter: number;
+  };
   readonly criticality: {
     readonly baselineNeutronRate: number;
     readonly zoneBoundaries: {

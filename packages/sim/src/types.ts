@@ -24,6 +24,10 @@ export type Atom = {
   // explains why the count is decided in phase 4 (atomSplit event payload) but
   // consumed by phase 5 (actual neutron spawn).
   readonly pendingNeutrons?: number;
+  // Set by phase 5 on the `excited → splitting` transition; consumed by phase 6
+  // to decide when `splittingDuration` ticks have elapsed and the atom should
+  // transition to `spent`. Cleared on transition to `spent`. Spec §4.1.5/§4.1.6.
+  readonly splittingStartedAt?: number;
 };
 
 export type Neutron = {
