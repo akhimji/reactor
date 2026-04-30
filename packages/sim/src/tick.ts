@@ -958,8 +958,78 @@ function phaseRecomputeCriticality(state: SimState, _config: SimConfig): SimStat
   return state;
 }
 
-// §4.1.9
-function phaseCheckEndConditions(state: SimState, _config: SimConfig): SimState {
+// §4.1.9 — check end conditions (§7).
+//
+// Evaluates lose conditions (meltdown, extinction) and the Site objective
+// stub. Lose conditions take priority over win conditions; meltdown takes
+// priority over extinction (a runaway reactor is a more immediate end than a
+// prolonged decline). The first triggered end sets `state.ended` and emits
+// `runEnded` once; subsequent ticks short-circuit at advanceTick (ADR-017).
+//
+// Criticality data comes from phase 8. Until phase 8 lands, `state.criticality`
+// is undefined and phase 9 skips both k-based checks. This is a deliberate
+// stub: forcing a default of k=0 here would silently extinct any run that
+// exceeds the grace period before phase 8 is wired up. When phase 8 lands and
+// populates criticality every tick, k-based checks engage automatically.
+//
+// Site objective evaluation is also stubbed: state.siteObjective is not yet a
+// SimState field (Sites are a game-package concern). The framework here checks
+// nothing today; when the game package wires Sites through, this branch will
+// read a populated objective and evaluate against it.
+//
+// No PRNG draws.
+function phaseCheckEndConditions(state: SimState, config: SimConfig): SimState {
+  if (state.ended !== null) return state;
+
+  const k = state.criticality?.k;
+
+  // Meltdown: k > meltdownThreshold (default 2.0). Strict greater-than.
+  if (k !== undefined && k > config.endConditions.meltdownThreshold) {
+    return {
+      ...state,
+      ended: { reason: 'meltdown' },
+      pendingEvents: [
+        ...state.pendingEvents,
+        {
+          type: 'runEnded',
+          tick: state.tick,
+          data: { outcome: 'meltdown', finalTick: state.tick, finalScore: 0 },
+        },
+      ],
+    };
+  }
+
+  // Extinction: k < extinctionThreshold for extinctionGracePeriod ticks.
+  if (k !== undefined) {
+    if (k < config.endConditions.extinctionThreshold) {
+      const next = state.ticksBelowExtinction + 1;
+      if (next >= config.endConditions.extinctionGracePeriod) {
+        return {
+          ...state,
+          ticksBelowExtinction: next,
+          ended: { reason: 'extinction' },
+          pendingEvents: [
+            ...state.pendingEvents,
+            {
+              type: 'runEnded',
+              tick: state.tick,
+              data: { outcome: 'extinction', finalTick: state.tick, finalScore: 0 },
+            },
+          ],
+        };
+      }
+      if (next === state.ticksBelowExtinction) return state;
+      return { ...state, ticksBelowExtinction: next };
+    }
+    // Rebounded above threshold: reset the counter.
+    if (state.ticksBelowExtinction !== 0) {
+      return { ...state, ticksBelowExtinction: 0 };
+    }
+  }
+
+  // Site objective stub: when the game package wires Sites through, evaluate
+  // here. No-op today.
+
   return state;
 }
 

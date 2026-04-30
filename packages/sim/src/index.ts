@@ -16,7 +16,7 @@ export type {
   SimEventType,
 } from './events.js';
 export type { PRNGState } from './prng.js';
-export type { SimCooldowns, SimInventory, SimState } from './state.js';
+export type { SimCooldowns, SimCriticality, SimInventory, SimState } from './state.js';
 export type {
   Atom,
   AtomId,

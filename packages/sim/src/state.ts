@@ -6,6 +6,7 @@ import type {
   AtomId,
   ControlRod,
   ControlRodId,
+  CriticalityZone,
   FuelRod,
   FuelRodId,
   Neutron,
@@ -25,6 +26,15 @@ export type SimInventory = {
   readonly scramAvailable: boolean;
 };
 
+// Populated by phase 8 (recompute criticality). Optional today because phase 8
+// is not yet implemented; phase 9 (end conditions) skips k-based checks when
+// this field is absent so existing tests and integration runs that span more
+// than `extinctionGracePeriod` ticks don't trip a false extinction.
+export type SimCriticality = {
+  readonly k: number;
+  readonly zone: CriticalityZone;
+};
+
 export type SimState = {
   readonly tick: number;
   readonly atoms: ReadonlyMap<AtomId, Atom>;
@@ -37,6 +47,10 @@ export type SimState = {
   readonly ended: { readonly reason: RunEndReason } | null;
   readonly pendingEvents: readonly SimEvent[];
   readonly nextEntityId: number;
+  // Phase 9 grace-period counter for extinction (§7.1). Increments each tick
+  // criticality is below threshold; resets to 0 on rebound.
+  readonly ticksBelowExtinction: number;
+  readonly criticality?: SimCriticality;
 };
 
 export function createSimState(seed: number, config: SimConfig): SimState {
@@ -56,6 +70,7 @@ export function createSimState(seed: number, config: SimConfig): SimState {
     ended: null,
     pendingEvents: [],
     nextEntityId: 1,
+    ticksBelowExtinction: 0,
   };
 }
 
