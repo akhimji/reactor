@@ -815,9 +815,67 @@ function phaseApplyCollisions(state: SimState, config: SimConfig): SimState {
   };
 }
 
-// §4.1.6
-function phaseAdvanceAtomStates(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.6 — advance atom states.
+//
+// For every atom in `splitting` state, transition to `spent` once
+// `splittingDuration` ticks have elapsed since `splittingStartedAt` (set by
+// phase 5). Phase 6 has no PRNG draws — transitions are pure timer-based.
+//
+// Other state transitions remain other phases' responsibility:
+//   intact → excited        phase 4 (collision split outcome)
+//   excited → splitting     phase 5
+//   intact → spent (absorb) phase 4
+//   intact → spent (decay)  phase 7 (auto-decay, not yet implemented)
+//
+// Spent atoms are NOT removed from state here — cleanup is phase 7's concern
+// (or possibly never; spent atoms may persist for visual purposes). This is
+// acceptable for the current session; spec §10 (cleanup threshold) lands with
+// phase 7.
+function phaseAdvanceAtomStates(state: SimState, config: SimConfig): SimState {
+  let hasSplitting = false;
+  for (const atom of state.atoms.values()) {
+    if (atom.state === 'splitting') {
+      hasSplitting = true;
+      break;
+    }
+  }
+  if (!hasSplitting) return state;
+
+  const splittingDuration = config.physics.splittingDuration;
+
+  let atoms = state.atoms;
+  const newEvents: SimEvent[] = [];
+  let mutated = false;
+
+  for (const [atomId, atom] of state.atoms) {
+    if (atom.state !== 'splitting') continue;
+    const startedAt = atom.splittingStartedAt;
+    if (startedAt === undefined) continue;
+    if (state.tick - startedAt < splittingDuration) continue;
+
+    const { splittingStartedAt: _drop, ...rest } = atom;
+    void _drop;
+    const updatedAtom: Atom = { ...rest, state: 'spent' };
+    const nextAtoms = new Map(atoms);
+    nextAtoms.set(atomId, updatedAtom);
+    atoms = nextAtoms;
+    mutated = true;
+
+    newEvents.push({
+      type: 'atomSpent',
+      tick: state.tick,
+      data: { atomId, position: atom.position },
+    });
+  }
+
+  if (!mutated) return state;
+
+  return {
+    ...state,
+    atoms,
+    pendingEvents:
+      newEvents.length > 0 ? [...state.pendingEvents, ...newEvents] : state.pendingEvents,
+  };
 }
 
 // §4.1.7
