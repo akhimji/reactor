@@ -1,4 +1,5 @@
 import type { FuelMix, InputCommand } from './actions.js';
+import { findNeutronAtomCollisions, type CollisionPair } from './collisions.js';
 import type { SimConfig } from './config.js';
 import type { SimEvent } from './events.js';
 import { next, type PRNGState } from './prng.js';
@@ -460,9 +461,242 @@ function phaseAdvanceNeutrons(state: SimState, config: SimConfig): SimState {
   };
 }
 
-// §4.1.4
-function phaseResolveCollisions(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.4 — resolve neutron-atom and neutron-controlRod collisions for the tick.
+//
+// This is the most allocation-heavy phase of the tick: it builds a per-tick
+// collision pair list, sorts it, walks it under a per-tick exclusion set, and
+// rebuilds atoms / neutrons / controlRods maps as it mutates them. Per-phase
+// allocation is acceptable for v1 (ADR-008 / typed-array refactor planned
+// milestone); revisit alongside the neutron storage refactor.
+//
+// Order of operations:
+// 1. Build all neutron-atom collision pairs (collisions.ts; ADR-024).
+// 2. Sort by neutron spawn order (spawnedAt asc, then neutronId asc as
+//    tiebreak; neutron ids are issued sequentially so this is stable and
+//    deterministic).
+// 3. Resolve each pair under a per-tick "atom already hit" set (ADR-020):
+//    pass-through losers are not consumed and emit no events; the winner
+//    splits or absorbs per ADR-022.
+// 4. Process control rod absorption against surviving neutrons. Per ADR-021
+//    this is a per-tick Bernoulli trial. Newly-spawned neutrons are skipped
+//    per ADR-016.
+//
+// All randomness threads through state.prng (ADR-005). One PRNG draw per
+// resolved atom collision, plus one extra draw for the neutron count when
+// the outcome is `split`. One PRNG draw per neutron-rod inside-radius check.
+function phaseResolveCollisions(state: SimState, config: SimConfig): SimState {
+  const allPairs = findNeutronAtomCollisions(
+    state.neutrons,
+    state.atoms,
+    state.tick,
+    config,
+  );
+
+  let atoms = state.atoms;
+  let neutrons = state.neutrons;
+  let prng = state.prng;
+  const newEvents: SimEvent[] = [];
+  let mutated = false;
+
+  if (allPairs.length > 0) {
+    const pairs = sortPairsBySpawnOrder(allPairs, state.neutrons);
+    const hitAtoms = new Set<AtomId>();
+
+    for (const pair of pairs) {
+      if (hitAtoms.has(pair.atomId)) continue;
+
+      const atom = atoms.get(pair.atomId);
+      const neutron = neutrons.get(pair.neutronId);
+      if (atom === undefined || neutron === undefined) continue;
+
+      const behavior = config.atoms[atom.type];
+      const [roll, p1] = next(prng);
+      prng = p1;
+
+      if (roll < behavior.splitChance) {
+        // Split: atom enters excited; record neutronsReleased for phase 5.
+        const minN = behavior.neutronsPerSplit.min;
+        const maxN = behavior.neutronsPerSplit.max;
+        const [u, p2] = next(prng);
+        prng = p2;
+        const neutronsReleased =
+          minN + Math.floor(u * (maxN - minN + 1));
+
+        const updatedAtom: Atom = {
+          ...atom,
+          state: 'excited',
+          excitedSince: state.tick,
+          pendingNeutrons: neutronsReleased,
+        };
+        const nextAtoms = new Map(atoms);
+        nextAtoms.set(atom.id, updatedAtom);
+        atoms = nextAtoms;
+
+        const nextNeutrons = new Map(neutrons);
+        nextNeutrons.delete(neutron.id);
+        neutrons = nextNeutrons;
+
+        hitAtoms.add(atom.id);
+        mutated = true;
+
+        newEvents.push({
+          type: 'atomSplit',
+          tick: state.tick,
+          data: {
+            atomId: atom.id,
+            position: atom.position,
+            neutronsReleased,
+          },
+        });
+        newEvents.push({
+          type: 'neutronAbsorbed',
+          tick: state.tick,
+          data: {
+            neutronId: neutron.id,
+            absorbedBy: 'atom',
+            targetId: atom.id,
+            position: neutron.position,
+          },
+        });
+        newEvents.push({
+          type: 'neutronExpired',
+          tick: state.tick,
+          data: { neutronId: neutron.id, reason: 'absorbed' },
+        });
+      } else if (roll < behavior.splitChance + behavior.absorbChance) {
+        // Absorb: atom transitions to spent (except B10 — immortal per ADR-022).
+        const isImmortal = atom.type === 'B10';
+
+        if (!isImmortal) {
+          const updatedAtom: Atom = { ...atom, state: 'spent' };
+          const nextAtoms = new Map(atoms);
+          nextAtoms.set(atom.id, updatedAtom);
+          atoms = nextAtoms;
+          newEvents.push({
+            type: 'atomSpent',
+            tick: state.tick,
+            data: { atomId: atom.id, position: atom.position },
+          });
+        }
+
+        const nextNeutrons = new Map(neutrons);
+        nextNeutrons.delete(neutron.id);
+        neutrons = nextNeutrons;
+
+        hitAtoms.add(atom.id);
+        mutated = true;
+
+        newEvents.push({
+          type: 'neutronAbsorbed',
+          tick: state.tick,
+          data: {
+            neutronId: neutron.id,
+            absorbedBy: 'atom',
+            targetId: atom.id,
+            position: neutron.position,
+          },
+        });
+        newEvents.push({
+          type: 'neutronExpired',
+          tick: state.tick,
+          data: { neutronId: neutron.id, reason: 'absorbed' },
+        });
+      }
+      // else: pass-through. No state change, no event, no hitAtoms entry.
+    }
+  }
+
+  // Control rod absorption (ADR-021): position-only check against each rod
+  // radius; the rod is static so no swept geometry is needed.
+  let controlRods = state.controlRods;
+  if (controlRods.size > 0 && neutrons.size > 0) {
+    const survivingNeutrons = new Map(neutrons);
+    const updatedRods = new Map<ControlRodId, ControlRod>();
+    const removedRods = new Set<ControlRodId>();
+    let rodsMutated = false;
+
+    for (const [rodId, rod] of controlRods) {
+      let workingRod = rod;
+      const r2 = rod.radius * rod.radius;
+
+      for (const [nId, n] of survivingNeutrons) {
+        if (n.spawnedAt === state.tick) continue;
+        const dx = n.position.x - rod.position.x;
+        const dy = n.position.y - rod.position.y;
+        if (dx * dx + dy * dy > r2) continue;
+
+        const [roll, p1] = next(prng);
+        prng = p1;
+        if (roll >= workingRod.absorbStrength) continue;
+
+        survivingNeutrons.delete(nId);
+        workingRod = { ...workingRod, durability: workingRod.durability - 1 };
+        rodsMutated = true;
+
+        newEvents.push({
+          type: 'neutronAbsorbed',
+          tick: state.tick,
+          data: {
+            neutronId: nId,
+            absorbedBy: 'controlRod',
+            targetId: rodId,
+            position: n.position,
+          },
+        });
+        newEvents.push({
+          type: 'neutronExpired',
+          tick: state.tick,
+          data: { neutronId: nId, reason: 'absorbed' },
+        });
+
+        if (workingRod.durability <= 0) {
+          removedRods.add(rodId);
+          newEvents.push({
+            type: 'controlRodDepleted',
+            tick: state.tick,
+            data: { controlRodId: rodId, position: rod.position },
+          });
+          break;
+        }
+      }
+
+      if (!removedRods.has(rodId)) updatedRods.set(rodId, workingRod);
+    }
+
+    if (rodsMutated) {
+      neutrons = survivingNeutrons;
+      controlRods = updatedRods;
+      mutated = true;
+    }
+  }
+
+  if (!mutated && newEvents.length === 0) return state;
+
+  return {
+    ...state,
+    atoms,
+    neutrons,
+    controlRods,
+    prng,
+    pendingEvents:
+      newEvents.length > 0 ? [...state.pendingEvents, ...newEvents] : state.pendingEvents,
+  };
+}
+
+function sortPairsBySpawnOrder(
+  pairs: readonly CollisionPair[],
+  neutrons: ReadonlyMap<NeutronId, Neutron>,
+): CollisionPair[] {
+  const copy = [...pairs];
+  copy.sort((a, b) => {
+    const na = neutrons.get(a.neutronId);
+    const nb = neutrons.get(b.neutronId);
+    const sa = na?.spawnedAt ?? 0;
+    const sb = nb?.spawnedAt ?? 0;
+    if (sa !== sb) return sa - sb;
+    return (a.neutronId as unknown as number) - (b.neutronId as unknown as number);
+  });
+  return copy;
 }
 
 // §4.1.5

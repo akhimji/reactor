@@ -53,7 +53,7 @@
     "controlRod": {
       "radius": 30,
       "durability": 50,
-      "absorbStrength": 0.7,
+      "absorbStrength": 0.4,
       "inventoryDefault": 3
     },
     "fuelRod": {
