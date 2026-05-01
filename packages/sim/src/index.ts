@@ -2,6 +2,7 @@ export { findNeutronAtomCollisions } from './collisions.js';
 export { loadConfig } from './config.js';
 export { createEventEmitter } from './events.js';
 export { createPRNG, next, nextAngle, nextInt, nextRange } from './prng.js';
+export { Sim } from './sim.js';
 export { createSimState, drainEvents } from './state.js';
 export { advanceTick } from './tick.js';
 
@@ -16,6 +17,7 @@ export type {
   SimEventType,
 } from './events.js';
 export type { PRNGState } from './prng.js';
+export type { EventType, Handler, Subscriptions, Unsubscribe } from './sim.js';
 export type { SimCooldowns, SimCriticality, SimInventory, SimState } from './state.js';
 export type {
   Atom,
