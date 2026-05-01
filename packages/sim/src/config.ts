@@ -60,8 +60,12 @@ export type SimConfig = {
     readonly extinctionGracePeriod: number;
   };
   readonly scoring: {
-    readonly basePerTick: number;
-    readonly edgeMultiplier: number;
+    // Per-tick base score earned while in the nominal zone (ADR-032).
+    readonly baseRatePerTick: number;
+    // Maximum quadratic edge bonus applied at the nominal zone boundary
+    // (ADR-032). With edgeBonusMax = 1.0, a player at exactly k = 0.9 or
+    // k = 1.1 earns 2× baseRatePerTick; at k = 1.0 they earn baseRatePerTick.
+    readonly edgeBonusMax: number;
   };
   readonly playfield: {
     readonly bounds: {

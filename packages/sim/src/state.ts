@@ -26,10 +26,9 @@ export type SimInventory = {
   readonly scramAvailable: boolean;
 };
 
-// Populated by phase 8 (recompute criticality). Optional today because phase 8
-// is not yet implemented; phase 9 (end conditions) skips k-based checks when
-// this field is absent so existing tests and integration runs that span more
-// than `extinctionGracePeriod` ticks don't trip a false extinction.
+// Populated by phase 8 (recompute criticality). Null until phase 8 first runs
+// and writes the initial value (one tick after run start). Phase 9's k-based
+// checks guard on null and skip when criticality has not yet been computed.
 export type SimCriticality = {
   readonly k: number;
   readonly zone: CriticalityZone;
@@ -50,7 +49,16 @@ export type SimState = {
   // Phase 9 grace-period counter for extinction (§7.1). Increments each tick
   // criticality is below threshold; resets to 0 on rebound.
   readonly ticksBelowExtinction: number;
-  readonly criticality?: SimCriticality;
+  readonly criticality: SimCriticality | null;
+  // Fixed-length rolling buffer indexed by `tick % criticalityWindow`. Each
+  // slot holds the count of neutrons produced by fission events on that tick
+  // (sum of atomSplit.neutronsReleased per ADR-030). Phase 8 writes the
+  // current tick's slot, then sums all slots to compute k (ADR-029).
+  readonly fissionHistory: readonly number[];
+  // Run-cumulative score. Incremented by phase 8 while the reactor is in the
+  // nominal zone (ADR-032). Read by SCRAM and phase 9 to populate
+  // runEnded.finalScore (ADR-033).
+  readonly score: number;
 };
 
 export function createSimState(seed: number, config: SimConfig): SimState {
@@ -71,6 +79,9 @@ export function createSimState(seed: number, config: SimConfig): SimState {
     pendingEvents: [],
     nextEntityId: 1,
     ticksBelowExtinction: 0,
+    criticality: null,
+    fissionHistory: new Array(config.criticalityWindow).fill(0),
+    score: 0,
   };
 }
 

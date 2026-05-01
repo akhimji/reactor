@@ -76,8 +76,8 @@
     "extinctionGracePeriod": 300
   },
   "scoring": {
-    "basePerTick": 1,
-    "edgeMultiplier": 2
+    "baseRatePerTick": 1,
+    "edgeBonusMax": 1.0
   },
   "playfield": {
     "bounds": { "minX": -50, "minY": -50, "maxX": 50, "maxY": 50 }
