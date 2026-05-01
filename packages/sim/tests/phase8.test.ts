@@ -192,29 +192,17 @@ describe('phase 8: rolling window math', () => {
     expect(s.fissionHistory[1]).toBe(0);
   });
 
-  it('sustained 8 fissions/sec for full window: k = 1.0', () => {
-    // 8 fissions per tick × 60 ticks/sec ≠ 8/sec; the rate is 8/sec means
-    // 8 fissions across 60 ticks. With window=120 ticks (2 sec), sustained
-    // 8/sec = 16 fissions in window. Wait — let's be precise:
-    // baselineNeutronRate = 8 (neutrons/sec). windowSeconds = 120/60 = 2.
+  it('sustained fission rate produces expected k', () => {
+    // baselineNeutronRate = 8 neutrons/sec; windowSeconds = 120/60 = 2.
     // k = windowTotal / (windowSeconds * baselineNeutronRate) = total / 16.
-    // For k=1: total = 16. Spread 16 fissions across 120 slots.
+    // Pre-fill 17 slots with 1; phase 8 overwrites slot (input.tick+1) % 120
+    // = 1 with 0. Remaining 16 ones give windowTotal = 16, k = 1.0.
     const window = baseConfig.criticalityWindow;
     const fissionHistory = new Array(window).fill(0);
-    for (let i = 0; i < 16; i++) fissionHistory[i] = 1;
+    for (let i = 0; i < 17; i++) fissionHistory[i] = 1;
     const s = { ...createSimState(1, baseConfig), fissionHistory };
-    // Pre-position at tick=window so the slot-overwrite this tick lands on
-    // slot 0 (which holds 1, going to 0). After overwrite, total = 15.
-    // Hmm — that drops k below 1.0. Easier: pre-fill 17 entries; after
-    // overwrite of slot (tick+1)%window = 1, total = 16, k = 1.0 exactly.
-    const fissionHistory2 = new Array(window).fill(0);
-    for (let i = 0; i < 17; i++) fissionHistory2[i] = 1;
-    const s2 = { ...createSimState(1, baseConfig), fissionHistory: fissionHistory2 };
-    const r = advanceTick(s2, [], baseConfig);
+    const r = advanceTick(s, [], baseConfig);
 
-    // After phase 8: slot 1 (overwriteSlot for input tick=0) gets set to 0.
-    // Pre-fill had 17 slots = 1; one is overwritten to 0; remaining = 16.
-    // k = 16 / 16 = 1.0.
     expect(r.criticality?.k).toBeCloseTo(1.0, 10);
     expect(r.criticality?.zone).toBe<CriticalityZone>('nominal');
   });
