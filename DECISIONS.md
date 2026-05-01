@@ -426,3 +426,28 @@ Each entry follows this structure:
   - *Emit `tick` only on zone changes (treating `tick` as the change signal)* — rejected. Spec §8.1 explicitly defines `tick` as "emitted once per tick after all phases have run." It's the canonical per-frame stream; renaming it to a change-signal would conflate two concepts and break the spec.
   - *Skip `tick` emission until phase 8 lands and emit it from phase 10 once it exists* — rejected. Phase 10 (flush) doesn't know about criticality; it's the channel, not the source. Phase 8 is the right place to emit `tick` because it has both fields the payload requires (`criticality` and `zone`) and runs at the natural per-tick cadence.
 - **Consequences:** Phase 8's emission contract is two events per tick at most (one `tick`, optionally one `criticalityZoneChanged`). Per-tick `tick` events are bounded volume (60/sec) and not noise — they're the primary criticality stream the renderer subscribes to. `criticalityZoneChanged` fires on the first tick if the computed zone differs from the implicit starting zone of `extinct`; this is the spawn-frame-of-the-meter signal and is the correct semantic. After phase 8 lands, phase 9 reads `state.criticality.k` (no longer optional after this session) and the meltdown / extinction checks engage automatically. If a future phase needs a third criticality channel (e.g., a "k changed by Δ" signal for haptic feedback), log a new ADR and add a new event type — do not retrofit `tick` or `criticalityZoneChanged`.
+
+---
+
+## ADR-032: Score model — quadratic edge multiplier on time-in-nominal
+
+- **Date:** 2026-04-30
+- **Decision:** Score accumulates only while the reactor is in the `nominal` zone. Per-tick score is computed via a quadratic edge multiplier:
+  ```
+  if zone !== 'nominal': scoreThisTick = 0
+  else:
+    halfWidth = (nominalUpper - nominalLower) / 2          // (1.1 - 0.9) / 2 = 0.1
+    center = (nominalUpper + nominalLower) / 2             // 1.0
+    distance = abs(k - center)
+    normalized = distance / halfWidth                      // 0 at center, 1 at boundary
+    multiplier = 1 + edgeBonusMax * (normalized ^ 2)
+    scoreThisTick = baseRatePerTick * multiplier
+  ```
+  Defaults: `scoring.baseRatePerTick: 1`, `scoring.edgeBonusMax: 1.0`. With `edgeBonusMax = 1.0`, peak score (at exactly k=0.9 or k=1.1) is 2× the base rate; at center (k=1.0) the player earns the base rate exactly. Outside nominal, score is zero.
+- **Context:** Spec §5.3 says "Score also includes a multiplier for time spent near the edges of nominal (rewarding skilled play near boundaries vs. coasting in the middle)" but doesn't specify the multiplier shape. Phase 8 needs a concrete formula. Three families fit the spec wording (linear, quadratic, step); the choice shapes the gameplay loop's reward gradient and player-perceptible feedback.
+- **Alternatives:**
+  - *Linear edge bonus (`multiplier = 1 + edgeBonusMax * normalized`)* — rejected. The reward gradient is uniform from center to edge: each unit of distance from center earns the same incremental score. Players reading the meter as it climbs from 1.0 toward 1.1 wouldn't perceive a strong "I'm in the danger zone now, so I'm earning more" signal — the bonus accrues evenly the whole way. The skill loop is "stay near the edge"; a linear bonus doesn't differentiate "barely near edge" from "right at the edge" enough to drive perceptible feedback.
+  - *Step function (e.g., +50% bonus inside the outer 20% of nominal)* — rejected. Reads gamey: the score number visibly jumps when k crosses an arbitrary internal threshold, breaking the continuous-tuning model the rest of the sim uses. Also fragile to tuning — if the threshold isn't exactly at the player's intuitive "near edge" boundary, the feedback feels off.
+  - *Cubic or higher-power multiplier* — overkill. Quadratic already heavily rewards the outer 20% of nominal (`normalized=0.8 → 0.64x bonus`; `normalized=1.0 → 1.0x bonus`). Higher powers over-concentrate the reward in a thin band at the boundary, which makes the game feel like there's only one "right" k value and everything else is wasted.
+  - *Time-decayed multiplier (bonus stacks while sustained at edge, decays when moving toward center)* — out of scope for v1. Adds memory state and tuning surface (decay rate). The simple per-tick formula is sufficient to validate the core skill loop; combo-style scoring belongs in a later balance pass.
+- **Consequences:** `state.score` is a top-level number on `SimState` (ADR-033), incremented by phase 8 each tick. Quadratic shape rewards staying near boundaries (skilled play) over coasting at center (passive play); the perceptible "I'm earning more" gradient as the player approaches boundaries reinforces the skill loop the game is built around. `edgeBonusMax = 1.0` is a starting point; the formula is fixed by this ADR but the multiplier ceiling is a balance tuning value. The formula uses the configured `nominal` zone bounds (`subcritical` upper-bound = 0.9, `nominal` upper-bound = 1.1), so retuning zone boundaries automatically retunes scoring. `state.score` flows into `runEnded.finalScore` for all run-end paths (meltdown, extinction, stabilized, sustained) — phase 9 and `applyScram` read `state.score` instead of hardcoding `0` after this session. If playtest shows the quadratic shape is too punishing in mid-nominal (most score earned in a thin edge band), retune `edgeBonusMax` lower or move to a softer power; the algorithm is fixed by this ADR but those tunings are pure data changes.
