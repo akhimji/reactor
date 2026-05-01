@@ -206,7 +206,18 @@ describe('integration: full U235 split lifecycle', () => {
 
 describe('integration: Pu239 decays unused after timer', () => {
   it('Pu239 with no neutron interaction decays at decayTicks; atom removed immediately', () => {
-    const cfg = loadConfig(defaultConfig);
+    // With phase 8 active, an empty playfield produces k = 0 every tick, so
+    // phase 9 would extinct the run after `extinctionGracePeriod` ticks (300)
+    // — well before Pu239's decayTicks (1800). This test is scoped to phase 7
+    // behavior, not phase 9, so we extend the grace period past decayTicks.
+    const base = loadConfig(defaultConfig);
+    const cfg: SimConfig = {
+      ...base,
+      endConditions: {
+        ...base.endConditions,
+        extinctionGracePeriod: base.atoms.Pu239.decayTicks! + 100,
+      },
+    };
     const decayTicks = cfg.atoms.Pu239.decayTicks!;
     const pu239: Atom = {
       id: aid(1),
@@ -239,10 +250,12 @@ describe('integration: Pu239 decays unused after timer', () => {
     expect(decayed[0]!.data.atomId).toBe(aid(1));
     expect(decayed[0]!.data.type).toBe('Pu239');
 
-    // No further events related to this atom on subsequent ticks.
-    const eventsBeforeIdle = state.pendingEvents.length;
+    // No further atom-related events on subsequent ticks. Phase 8 emits a
+    // per-tick `tick` event regardless; filter those out to scope the check.
+    const nonTickBefore = state.pendingEvents.filter((e) => e.type !== 'tick').length;
     for (let i = 0; i < 5; i++) state = advanceTick(state, [], cfg);
-    expect(state.pendingEvents.length).toBe(eventsBeforeIdle);
+    const nonTickAfter = state.pendingEvents.filter((e) => e.type !== 'tick').length;
+    expect(nonTickAfter).toBe(nonTickBefore);
   });
 });
 

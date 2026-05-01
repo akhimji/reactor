@@ -221,8 +221,10 @@ describe('phase 7: auto-decay — spent cleanup path', () => {
 
     expect(findAll(s1.pendingEvents, 'atomSpent')).toHaveLength(0);
     expect(findAll(s1.pendingEvents, 'atomDecayed')).toHaveLength(0);
-    // No new events at all from this state — input-free, no other entities.
-    expect(s1.pendingEvents).toHaveLength(0);
+    // No atom-related events from this state — the only emission is phase 8's
+    // per-tick `tick` event, which is unrelated to cleanup.
+    const nonTickEvents = s1.pendingEvents.filter((e) => e.type !== 'tick');
+    expect(nonTickEvents).toHaveLength(0);
   });
 });
 

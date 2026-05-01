@@ -173,7 +173,10 @@ describe('phase 3: advance neutrons', () => {
     const initial = createSimState(1, config);
     const s1 = advanceTick(initial, [], config);
     expect(s1.neutrons.size).toBe(0);
-    expect(s1.pendingEvents).toEqual([]);
+    // Phase 8 always emits a `tick` event; filter it out to keep this assertion
+    // scoped to phase 3's behavior.
+    const nonTickEvents = s1.pendingEvents.filter((e) => e.type !== 'tick');
+    expect(nonTickEvents).toEqual([]);
   });
 
   it('appends to pendingEvents without dropping prior entries', () => {

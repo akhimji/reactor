@@ -10,6 +10,7 @@ import type {
   AtomType,
   ControlRod,
   ControlRodId,
+  CriticalityZone,
   FuelRod,
   FuelRodId,
   FuelRodReleaseEntry,
@@ -217,7 +218,7 @@ function applyScram(state: SimState): SimState {
       {
         type: 'runEnded',
         tick: state.tick,
-        data: { outcome: 'stabilized', finalTick: state.tick, finalScore: 0 },
+        data: { outcome: 'stabilized', finalTick: state.tick, finalScore: state.score },
       },
     ],
   };
@@ -953,9 +954,115 @@ function phaseAutoDecay(state: SimState, config: SimConfig): SimState {
   };
 }
 
-// §4.1.8
-function phaseRecomputeCriticality(state: SimState, _config: SimConfig): SimState {
-  return state;
+// §4.1.8 — recompute criticality.
+//
+// k is a rolling-window measure of fission output (spec §5.1). Each tick,
+// phase 8 records this tick's fission count into a fixed-length array indexed
+// by `tick % criticalityWindow`, then sums the array and divides by
+// `windowSeconds * baselineNeutronRate` to derive k. ADR-029 picks naive
+// recompute over a circular buffer with running sum: at 120 slots the cost
+// is invisible and naive avoids accumulated float drift.
+//
+// Fission count is the sum of `neutronsReleased` across atomSplit events for
+// this tick (ADR-030). atomDecayed events do NOT count — Pu239 timer-driven
+// decay releases zero neutrons by definition. Phase 8 reads pendingEvents
+// without consuming or modifying them; phase 10 owns the flush.
+//
+// Two events emitted (ADR-031):
+//   - `tick` — every tick, payload { criticality: k, zone }
+//   - `criticalityZoneChanged` — only on zone transitions, payload
+//     { previousZone, newZone, k }
+//
+// Score (ADR-032): while in nominal, increment state.score by a quadratic
+// edge-multiplied base rate. Outside nominal, no score increment.
+//
+// No PRNG draws — deterministic math only.
+function phaseRecomputeCriticality(state: SimState, config: SimConfig): SimState {
+  // 1. Count this tick's fission output from pendingEvents.
+  let fissionsThisTick = 0;
+  for (const ev of state.pendingEvents) {
+    if (ev.tick === state.tick && ev.type === 'atomSplit') {
+      fissionsThisTick += ev.data.neutronsReleased;
+    }
+  }
+
+  // 2. Update fissionHistory: overwrite the slot from `criticalityWindow`
+  //    ticks ago with this tick's count. SimState is immutable, so copy the
+  //    array (cheap at length 120).
+  const window = config.criticalityWindow;
+  const slot = ((state.tick % window) + window) % window;
+  const fissionHistory = state.fissionHistory.slice();
+  fissionHistory[slot] = fissionsThisTick;
+
+  // 3. Sum the rolling window and derive k. tickHz is the sim's fixed tick
+  //    rate; windowSeconds is the rolling-window duration in seconds.
+  let windowTotal = 0;
+  for (let i = 0; i < fissionHistory.length; i++) {
+    windowTotal += fissionHistory[i] as number;
+  }
+  const windowSeconds = window / config.tickHz;
+  const k = windowTotal / (windowSeconds * config.criticality.baselineNeutronRate);
+
+  // 4. Determine zone per spec §5.2 boundary inclusivity.
+  const newZone = classifyZone(k, config);
+
+  // 5. Determine previous zone. Before phase 8 first runs, state.criticality
+  //    is null — the implicit starting zone is `extinct` per ADR-031.
+  const previousZone = state.criticality?.zone ?? 'extinct';
+
+  // 6. Score: only accumulate while in nominal (ADR-032).
+  let scoreThisTick = 0;
+  if (newZone === 'nominal') {
+    const nominalLower = config.criticality.zoneBoundaries.subcritical; // 0.9 (upper bound of subcritical)
+    const nominalUpper = config.criticality.zoneBoundaries.nominal; // 1.1 (upper bound of nominal)
+    const halfWidth = (nominalUpper - nominalLower) / 2;
+    const center = (nominalUpper + nominalLower) / 2;
+    const distance = Math.abs(k - center);
+    const normalized = halfWidth === 0 ? 0 : distance / halfWidth;
+    const multiplier = 1 + config.scoring.edgeBonusMax * normalized * normalized;
+    scoreThisTick = config.scoring.baseRatePerTick * multiplier;
+  }
+
+  // 7. Emit events.
+  const newEvents: SimEvent[] = [
+    {
+      type: 'tick',
+      tick: state.tick,
+      data: { criticality: k, zone: newZone },
+    },
+  ];
+  if (previousZone !== newZone) {
+    newEvents.push({
+      type: 'criticalityZoneChanged',
+      tick: state.tick,
+      data: { previousZone, newZone, k },
+    });
+  }
+
+  return {
+    ...state,
+    fissionHistory,
+    criticality: { k, zone: newZone },
+    score: state.score + scoreThisTick,
+    pendingEvents: [...state.pendingEvents, ...newEvents],
+  };
+}
+
+function classifyZone(k: number, config: SimConfig): CriticalityZone {
+  const zb = config.criticality.zoneBoundaries;
+  // Spec §5.2:
+  //   k < 0.1                → extinct
+  //   0.1 ≤ k < 0.9          → subcritical
+  //   0.9 ≤ k ≤ 1.1          → nominal
+  //   1.1 < k ≤ 1.5          → supercritical
+  //   1.5 < k ≤ 2.0          → runaway
+  //   k > 2.0                → meltdown
+  if (k < zb.extinct) return 'extinct';
+  if (k < zb.subcritical) return 'subcritical';
+  if (k <= zb.nominal) return 'nominal';
+  if (k <= zb.supercritical) return 'supercritical';
+  if (k <= zb.runaway) return 'runaway';
+  return 'meltdown';
 }
 
 // §4.1.9 — check end conditions (§7).
@@ -993,7 +1100,7 @@ function phaseCheckEndConditions(state: SimState, config: SimConfig): SimState {
         {
           type: 'runEnded',
           tick: state.tick,
-          data: { outcome: 'meltdown', finalTick: state.tick, finalScore: 0 },
+          data: { outcome: 'meltdown', finalTick: state.tick, finalScore: state.score },
         },
       ],
     };
@@ -1013,7 +1120,7 @@ function phaseCheckEndConditions(state: SimState, config: SimConfig): SimState {
             {
               type: 'runEnded',
               tick: state.tick,
-              data: { outcome: 'extinction', finalTick: state.tick, finalScore: 0 },
+              data: { outcome: 'extinction', finalTick: state.tick, finalScore: state.score },
             },
           ],
         };
