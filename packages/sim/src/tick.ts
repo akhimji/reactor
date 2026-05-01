@@ -1141,6 +1141,11 @@ function phaseCheckEndConditions(state: SimState, config: SimConfig): SimState {
 }
 
 // §4.1.10
+// Phase 10 is structurally present but currently a no-op. `pendingEvents` are
+// read and dispatched by the `Sim` class wrapper after `advanceTick` returns
+// (see ADR-034). Keeping the phase as a no-op preserves its slot for future
+// in-tick concerns (event filtering, batching, prioritization) without
+// coupling `advanceTick` to the subscriber registry.
 function phaseEmitEvents(state: SimState, _config: SimConfig): SimState {
   return state;
 }
