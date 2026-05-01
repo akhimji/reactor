@@ -464,3 +464,24 @@ Each entry follows this structure:
   - *Nested under a future `state.scoring: { score: number, ... }` object* — rejected (premature). Today the only score-related state is the cumulative number. Wrapping it in an object would add nesting for hypothetical future fields (combos, achievements, multipliers) that don't exist. YAGNI: when a second scoring field genuinely needs to land, log a new ADR and move scoring under a sub-object then. Doing it preemptively pre-architects for features whose shape we don't yet know.
   - *Compute score on demand from event history (no state field at all)* — rejected. Phase 8 needs to read `state.criticality` (its own output) to decide whether to increment, and the cumulative value needs to survive across ticks. A field is the right channel. Computing on demand from events would also require phase 9 to walk the event history every tick to populate `runEnded.finalScore`, which is an O(events) read where O(1) suffices.
 - **Consequences:** `SimState` gains one new top-level field, mirroring the existing pattern (`tick`, `nextEntityId`, `ticksBelowExtinction` are all top-level numbers). Direct access from any phase or subscriber is `state.score` — no decoding through nested objects. If future scoring features need additional state, they become additional top-level fields (e.g., `state.comboCount`, `state.lastNominalEnterTick`) until the count justifies a wrapper object. The architectural rule is the same one from ADR-006 / ADR-015: don't pre-architect; let the shape emerge as features land.
+
+---
+
+## ADR-034: Type-keyed subscription model
+
+- **Date:** 2026-05-01
+- **Decision:** The sim exposes subscription as a per-event-type registration on a `Sim` wrapper class:
+  ```typescript
+  sim.subscribe<T extends SimEvent['type']>(
+    type: T,
+    handler: (event: Extract<SimEvent, { type: T }>) => void,
+  ): Unsubscribe;
+  ```
+  `Unsubscribe = () => void`; calling the returned function removes the subscription. A subscriber wanting multiple event types calls `subscribe` multiple times. Internally, the wrapper holds `Map<EventType, Set<Handler>>`. Phase 10 (the spec's "emit events" phase) is structurally retained as a no-op inside `advanceTick`; the actual dispatch happens in `Sim.tick` after `advanceTick` returns. There is no wildcard subscription in v1.
+- **Context:** ADR-018 established that event payloads are typed and self-contained. The dispatch shape was left open. Phase 10 is the last sim core piece and the renderer in the game package will subscribe through it; we need a subscription API that preserves the per-event payload typing without forcing every subscriber to discriminate on `event.type` at runtime.
+- **Alternatives:**
+  - *Single global handler model (`subscribe((event: SimEvent) => void)`)* — rejected. Loses type narrowing at the handler boundary: every subscriber receives the full `SimEvent` union and must `switch (event.type)` to access typed payloads. That defeats the typed-payload work from ADR-018 and pushes discrimination logic into every consumer.
+  - *Wildcard plus per-type subscription* — rejected for v1. The wildcard adds API surface and a second dispatch path for one hypothetical use case (e.g., logging all events for replay). YAGNI; if a real use case appears, add it then. Per-type subscription is a strict subset of the API space, so a future wildcard layer is purely additive.
+  - *Subscribers passed explicitly to `advanceTick(state, inputs, config, subscribers)`* — rejected. Subscribers are inherently stateful (registry persists across ticks); threading them through every `advanceTick` call is awkward and pollutes the pure-functional core. The Sim wrapper class owns the registry; `advanceTick` stays pure.
+  - *Phase 10 dispatches inside `advanceTick`* — rejected. Would require `advanceTick` to know about the subscriber registry, breaking its pure-functional contract. Resolved by keeping phase 10 a structural no-op and letting `Sim.tick` handle dispatch after `advanceTick` returns. Phase 10's slot is reserved for future use (filtering, batching, prioritization).
+- **Consequences:** TypeScript narrows the handler's `event` parameter to the specific variant per type (`subscribe('tick', e => /* e.data: { criticality, zone } */)`). Subscribers register one handler per event type they care about; a renderer interested in `tick`, `atomSplit`, and `runEnded` calls `subscribe` three times. The pure-functional core (`advanceTick`, `createSimState`) is unchanged — both remain exported for tests, balance scripts, and tooling. The `Sim` class becomes the recommended entry point for the game package. Wildcard or higher-order subscription patterns can layer on top later without breaking this contract.
