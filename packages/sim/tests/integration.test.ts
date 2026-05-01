@@ -4,8 +4,10 @@ import {
   advanceTick,
   createSimState,
   loadConfig,
+  Sim,
   type Atom,
   type AtomId,
+  type InputCommand,
   type SimConfig,
   type SimEvent,
   type SimState,
@@ -552,5 +554,149 @@ describe('integration: criticality lifecycle — subcritical decay to extinction
     const ended = findAll(state.pendingEvents, 'runEnded');
     expect(ended).toHaveLength(1);
     expect(ended[0]!.data.outcome).toBe('extinction');
+  });
+});
+
+describe('integration: full chain reaction observed via subscribers', () => {
+  // Drives a forced-split chain reaction through Sim and observes events via
+  // type-keyed subscribers. Validates that the renderer's-perspective path
+  // (subscribe → tick → handler invocation) faithfully delivers every event
+  // emitted by the underlying advanceTick pipeline, in order, without loss.
+  //
+  // We use input commands only (placeFuelRod + injectNeutron + scram) to
+  // drive the scenario — no state injection — so the test exercises Sim's
+  // public API end-to-end. Ground truth comes from running the exact same
+  // input timeline through raw advanceTick and collecting pendingEvents per
+  // tick before clearing. Sim's subscriber stream must match that sequence
+  // exactly.
+  it('subscribers receive the full event stream emitted during a chain reaction', () => {
+    const base = withForcedSplits({ u235Neutrons: 2 });
+    // Extend grace so the test can run long enough for fuel-rod release and
+    // chain ignition without phase 9 extincting on the empty early-tick
+    // playfield.
+    const cfg: SimConfig = {
+      ...base,
+      endConditions: { ...base.endConditions, extinctionGracePeriod: 100_000 },
+    };
+
+    const tickCount = 250;
+    const inputsByTick = new Map<number, readonly InputCommand[]>([
+      [
+        1,
+        [
+          {
+            type: 'placeFuelRod',
+            position: { x: 0, y: 0 },
+            fuelMix: { U235: 49 },
+          },
+        ],
+      ],
+      [
+        130,
+        [
+          {
+            type: 'injectNeutron',
+            position: { x: -10, y: 0 },
+            direction: { x: 1, y: 0 },
+          },
+        ],
+      ],
+      [
+        160,
+        [
+          {
+            type: 'injectNeutron',
+            position: { x: 0, y: -10 },
+            direction: { x: 0, y: 1 },
+          },
+        ],
+      ],
+      [tickCount, [{ type: 'scram' }]],
+    ]);
+
+    function inputsFor(tick: number): readonly InputCommand[] {
+      return inputsByTick.get(tick) ?? [];
+    }
+
+    // Ground truth via raw advanceTick.
+    function captureExpected(): readonly SimEvent[] {
+      let state = createSimState(7, cfg);
+      const collected: SimEvent[] = [];
+      for (let t = 1; t <= tickCount && state.ended === null; t++) {
+        state = advanceTick(state, inputsFor(t), cfg);
+        collected.push(...state.pendingEvents);
+        state = { ...state, pendingEvents: [] };
+      }
+      return collected;
+    }
+
+    const expected = captureExpected();
+
+    // Same scenario through Sim with subscribers.
+    const sim = new Sim(cfg, 7);
+    const observed: SimEvent[] = [];
+    const perType = {
+      tick: [] as SimEvent[],
+      atomSpawned: [] as SimEvent[],
+      atomSplit: [] as SimEvent[],
+      atomSpent: [] as SimEvent[],
+      neutronSpawned: [] as SimEvent[],
+      runEnded: [] as SimEvent[],
+    };
+    sim.subscribe('tick', (e) => {
+      observed.push(e);
+      perType.tick.push(e);
+    });
+    sim.subscribe('atomSpawned', (e) => {
+      observed.push(e);
+      perType.atomSpawned.push(e);
+    });
+    sim.subscribe('atomSplit', (e) => {
+      observed.push(e);
+      perType.atomSplit.push(e);
+    });
+    sim.subscribe('atomSpent', (e) => {
+      observed.push(e);
+      perType.atomSpent.push(e);
+    });
+    sim.subscribe('atomDecayed', (e) => observed.push(e));
+    sim.subscribe('neutronSpawned', (e) => {
+      observed.push(e);
+      perType.neutronSpawned.push(e);
+    });
+    sim.subscribe('neutronAbsorbed', (e) => observed.push(e));
+    sim.subscribe('neutronExpired', (e) => observed.push(e));
+    sim.subscribe('criticalityZoneChanged', (e) => observed.push(e));
+    sim.subscribe('controlRodPlaced', (e) => observed.push(e));
+    sim.subscribe('controlRodDepleted', (e) => observed.push(e));
+    sim.subscribe('fuelRodPlaced', (e) => observed.push(e));
+    sim.subscribe('fuelRodExhausted', (e) => observed.push(e));
+    sim.subscribe('runEnded', (e) => {
+      observed.push(e);
+      perType.runEnded.push(e);
+    });
+
+    for (let t = 1; t <= tickCount && sim.getState().ended === null; t++) {
+      sim.tick(inputsFor(t));
+    }
+
+    // 1. Subscribers received all expected event types for this scenario.
+    expect(perType.tick.length).toBeGreaterThan(0);
+    expect(perType.atomSpawned.length).toBeGreaterThan(0);
+    expect(perType.atomSplit.length).toBeGreaterThan(0);
+    expect(perType.atomSpent.length).toBeGreaterThan(0);
+    expect(perType.neutronSpawned.length).toBeGreaterThan(0);
+    expect(perType.runEnded.length).toBe(1);
+
+    // 2. Event sequences match raw advanceTick — no events lost, none added,
+    //    ordering preserved.
+    expect(observed).toEqual(expected);
+
+    // 3. runEnded payload is consistent with Sim state.
+    const ev = perType.runEnded[0]!;
+    if (ev.type !== 'runEnded') throw new Error('unreachable narrowing');
+    expect(ev.data.outcome).toBe(sim.getState().ended?.reason);
+    expect(ev.data.finalScore).toBe(sim.getState().score);
+    expect(ev.data.finalTick).toBe(sim.getState().tick);
   });
 });
