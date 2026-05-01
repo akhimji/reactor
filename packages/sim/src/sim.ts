@@ -29,12 +29,11 @@ export class Sim implements Subscriptions {
     this.state = createSimState(seed, config);
   }
 
-  // Subscriber dispatch lands in the next commit (ADR-034). For now `tick`
-  // advances state and clears pendingEvents so the structural slot is in
-  // place; subscribers registered today receive nothing until dispatch is
-  // wired.
   tick(inputs: readonly InputCommand[]): void {
     this.state = advanceTick(this.state, inputs, this.config);
+    this.dispatchEvents();
+    // Clear regardless of subscriber outcomes (ADR-035): a thrown handler
+    // cannot leave events stuck in the queue.
     this.state = { ...this.state, pendingEvents: [] };
   }
 
@@ -53,5 +52,26 @@ export class Sim implements Subscriptions {
 
   getState(): Readonly<SimState> {
     return this.state;
+  }
+
+  private dispatchEvents(): void {
+    for (const event of this.state.pendingEvents) {
+      const handlers = this.subscribers.get(event.type);
+      if (!handlers) continue;
+      // Set preserves insertion order; subscribers receive events in
+      // registration order (documented dispatch contract per ADR-034).
+      for (const handler of handlers) {
+        try {
+          // Safe: `handlers` is the set registered for `event.type`, so the
+          // erased handler matches the event's narrowed variant by
+          // construction.
+          handler(event);
+        } catch (error) {
+          // ADR-035: catch and continue. console.error is the
+          // dependency-free default; structured logging is a v2 concern.
+          console.error('Sim subscriber error:', error, { event });
+        }
+      }
+    }
   }
 }
