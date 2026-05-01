@@ -16,11 +16,21 @@ If a tool needs rendering, it does not belong here. Make it a separate game scen
 The example: `src/balance.ts` runs one sim for N ticks and prints the outcome as JSON.
 
 ```sh
-pnpm --filter @reactor/tools run balance            # default: seed=1, ticks=600
-pnpm --filter @reactor/tools run balance 42 3600    # seed=42, 60s of sim time
+pnpm --filter @reactor/tools run balance              # default: seed=1, ticks=600, mode=raw
+pnpm --filter @reactor/tools run balance 42 3600      # seed=42, 60s of sim time, raw mode
+pnpm --filter @reactor/tools run balance 42 3600 sim  # same, but driven through the Sim wrapper
 ```
 
 `balance` is wired in `package.json` as `tsx src/balance.ts`. `tsx` runs TypeScript directly without a build step — fine for tools, not for the shipped game.
+
+### `raw` vs `sim`
+
+The sim package exposes two valid entry points for headless work:
+
+- **Raw functional core** — `createSimState` + `advanceTick`. Pure, deterministic, no subscriber dispatch. Lowest overhead. The right default for parameter sweeps and outcome-only emitters: each call returns the new state and you read `state.pendingEvents` directly when you want them.
+- **Sim wrapper class** — `new Sim(config, seed)`, then `sim.tick(inputs)` and `sim.subscribe(type, handler)`. Adds a per-event dispatch step. The right choice when a script needs to observe the event stream as it happens (debug traces, CSV emitters that record per-event detail, replay verification). The renderer in `@reactor/game` is the primary consumer of this interface.
+
+Both produce identical state given the same `(seed, inputs, config)`. The Sim wrapper is a thin convenience layer over the pure functions; the determinism contract from ADR-005 holds either way.
 
 ## How to write a new balance script
 
