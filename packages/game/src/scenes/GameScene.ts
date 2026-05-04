@@ -109,6 +109,9 @@ export class GameScene extends Phaser.Scene {
   private mouseInside = false;
   private injectCooldownTicks = 0;
 
+  private simConfig!: ReturnType<typeof loadConfig>;
+  private restartButton: HTMLButtonElement | null = null;
+
   constructor() {
     super({ key: 'GameScene' });
   }
@@ -118,22 +121,35 @@ export class GameScene extends Phaser.Scene {
     // ADR-038: prototype-mode extinction grace is extended to 1800 ticks
     // (30 s) so a tester can orient before the run dies. Production Sites
     // set their own grace via Site config when the Site system lands.
-    const config = loadConfig({
+    this.simConfig = loadConfig({
       ...baseConfig,
       endConditions: { ...baseConfig.endConditions, extinctionGracePeriod: 1800 },
     });
-    // Fixed seed (42) so the prototype is reproducible session-to-session.
-    // Site-driven seeding lands when the Site system is wired.
-    this.sim = new Sim(config, 42);
-    this.injectCooldownTicks = config.actions.injectCooldown;
+    this.injectCooldownTicks = this.simConfig.actions.injectCooldown;
 
     this.cameras.main.setBackgroundColor('#000000');
 
-    this.setupSubscriptions();
     this.setupInput();
     this.setupOverlay();
     this.setupInstructions();
     this.logCoordinateVerification();
+
+    this.initSim();
+
+    this.lastTime = performance.now();
+    this.secondStartedAt = this.lastTime;
+  }
+
+  // Constructs a fresh Sim instance, wires its subscriptions, and queues the
+  // hardcoded fuel rod placement on tick 0. Called from create() and on
+  // restart. Anything that depends on the *current* sim instance (subscriber
+  // callbacks, cooldown reads) goes through this.sim and is naturally
+  // updated when this.sim is replaced.
+  private initSim(): void {
+    // Fixed seed (42) so the prototype is reproducible session-to-session.
+    // Site-driven seeding lands when the Site system is wired.
+    this.sim = new Sim(this.simConfig, 42);
+    this.setupSubscriptions();
 
     // Debug seed: hardcoded fuel rod at origin so there's something to see and
     // interact with. ~11 atoms across the rod's release schedule. Replaced by
@@ -143,9 +159,21 @@ export class GameScene extends Phaser.Scene {
       position: { x: 0, y: 0 },
       fuelMix: { U235: 8, U238: 2, Pu239: 1 },
     });
+  }
 
+  private restart(): void {
+    for (const sprite of this.atomSprites.values()) sprite.destroy();
+    this.atomSprites.clear();
+    for (const sprite of this.neutronSprites.values()) sprite.destroy();
+    this.neutronSprites.clear();
+    this.endBanner = null;
+    this.hasReceivedFirstInput = false;
+    this.pendingInputs = [];
+    this.accumulator = 0;
     this.lastTime = performance.now();
-    this.secondStartedAt = this.lastTime;
+    this.hideRestartButton();
+    this.setupInstructions();
+    this.initSim();
   }
 
   override update(): void {
@@ -285,7 +313,26 @@ export class GameScene extends Phaser.Scene {
     this.sim.subscribe('runEnded', (e) => {
       this.endBanner = `RUN ENDED — ${e.data.outcome.toUpperCase()} @ tick ${e.data.finalTick} | score ${e.data.finalScore}`;
       console.log(`[reactor] ${this.endBanner}`);
+      this.showRestartButton();
     });
+  }
+
+  private showRestartButton(): void {
+    if (this.restartButton) return;
+    const host = document.getElementById('game') ?? document.body;
+    const btn = document.createElement('button');
+    btn.id = 'restart-button';
+    btn.type = 'button';
+    btn.textContent = '[ RESTART ]';
+    btn.addEventListener('click', () => this.restart());
+    host.appendChild(btn);
+    this.restartButton = btn;
+  }
+
+  private hideRestartButton(): void {
+    if (!this.restartButton) return;
+    this.restartButton.remove();
+    this.restartButton = null;
   }
 
   private setupInput(): void {
