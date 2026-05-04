@@ -78,6 +78,8 @@ export class GameScene extends Phaser.Scene {
 
   private overlayLeft!: HTMLElement;
   private overlayRight!: HTMLElement;
+  private instructionsOverlay: HTMLElement | null = null;
+  private hasReceivedFirstInput = false;
   private endBanner: string | null = null;
 
   constructor() {
@@ -102,6 +104,7 @@ export class GameScene extends Phaser.Scene {
     this.setupSubscriptions();
     this.setupInput();
     this.setupOverlay();
+    this.setupInstructions();
     this.logCoordinateVerification();
 
     // Debug seed: hardcoded fuel rod at origin so there's something to see and
@@ -228,7 +231,35 @@ export class GameScene extends Phaser.Scene {
         position: { x: simX, y: simY },
         direction: { x: simX / len, y: simY / len },
       });
+      if (!this.hasReceivedFirstInput) {
+        this.hasReceivedFirstInput = true;
+        this.dismissInstructions();
+      }
     });
+  }
+
+  private setupInstructions(): void {
+    const host = document.getElementById('game') ?? document.body;
+    let el = document.getElementById('instructions-overlay');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'instructions-overlay';
+      host.appendChild(el);
+    }
+    el.classList.remove('hidden');
+    el.textContent =
+      'REACTOR — PROTOTYPE\n' +
+      'Click to fire a neutron at the reactor core.\n' +
+      'Sustain the chain reaction to score points.';
+    this.instructionsOverlay = el;
+  }
+
+  private dismissInstructions(): void {
+    const el = this.instructionsOverlay;
+    if (!el) return;
+    this.instructionsOverlay = null;
+    el.classList.add('hidden');
+    window.setTimeout(() => el.remove(), 600);
   }
 
   private setupOverlay(): void {

@@ -49,6 +49,42 @@
       #debug-overlay .col.right {
         text-align: right;
       }
+      #instructions-overlay {
+        position: absolute;
+        top: 3rem;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.75rem 1rem;
+        font-size: 13px;
+        line-height: 1.5;
+        color: #c8c8c8;
+        background: rgba(0, 0, 0, 0.6);
+        border: 1px solid #333;
+        white-space: pre;
+        text-align: center;
+        pointer-events: none;
+        opacity: 1;
+        transition: opacity 500ms ease-out;
+      }
+      #instructions-overlay.hidden {
+        opacity: 0;
+      }
+      #restart-button {
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        padding: 0.75rem 1.5rem;
+        font: inherit;
+        font-size: 16px;
+        color: #c8c8c8;
+        background: #000;
+        border: 1px solid #c8c8c8;
+        cursor: pointer;
+      }
+      #restart-button:hover {
+        background: #1a1a1a;
+      }
     </style>
   </head>
   <body>
