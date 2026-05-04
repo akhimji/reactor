@@ -509,3 +509,36 @@ Each entry follows this structure:
   - *"Just enough" polish — basic art assets but no full pass* — rejected as a slippery default. There is no defensible stopping point between "primitives" and "production" that doesn't keep gravitating toward production once the assets exist. The discipline is easier to enforce as a binary: primitives until the gate, then a deliberate art sprint after.
   - *Apply polish only to mechanics already locked* — rejected. Atoms, neutrons, criticality, control rods, and fuel rods are all v1 mechanics; "locked" here just means "shipped to balance pass," which is well after the playtest gate. The earliest defensible polish trigger is still the gate.
 - **Consequences:** Across this session and the sessions leading to playtest, work that proposes art, HUD styling, animation layers, particle systems, or sound is rejected on sight by reference to this ADR. Every scope decision in `packages/game` answers the question "does this serve mechanic validation, or polish?" If validation: in scope. If polish: deferred. The trade-off is that the prototype will look genuinely ugly during playtesting; testers will need to be told explicitly that primitives are the design choice, not the design state. Once the gate passes, this ADR is superseded by an art-direction ADR and the visual layer is rebuilt against a defined palette / sprite spec.
+
+## ADR-037: Fixed-step accumulator for sim/render decoupling
+
+- **Date:** 2026-05-03
+- **Decision:** The game's render loop uses a fixed-step accumulator pattern in `GameScene.update`. Sim ticks at a fixed 60Hz (`TICK_MS = 1000 / 60 ≈ 16.67ms`) regardless of display refresh rate. Each frame we accumulate elapsed wall time, run as many sim ticks as fit (capped per frame), and render once at the end. The cap is `MAX_TICKS_PER_FRAME = 5`; if hit, the accumulator is dropped to zero to prevent the spiral-of-death (a backgrounded tab waking up with seconds of debt). Visual interpolation between ticks is **not** implemented in v1 — entities render at their last completed sim position. Pseudocode:
+
+  ```
+  let accumulator = 0
+  let lastTime = performance.now()
+  const TICK_MS = 1000 / 60
+  const MAX_TICKS_PER_FRAME = 5
+  function update() {
+    const now = performance.now()
+    accumulator += now - lastTime
+    lastTime = now
+    let ticks = 0
+    while (accumulator >= TICK_MS && ticks < MAX_TICKS_PER_FRAME) {
+      sim.tick(pendingInputs); pendingInputs = []
+      accumulator -= TICK_MS
+      ticks++
+    }
+    if (ticks === MAX_TICKS_PER_FRAME) accumulator = 0
+    render(sim.getState())
+  }
+  ```
+
+- **Context:** ADR-005 / sim spec §3 lock the sim at 60Hz with deterministic tick semantics. Display refresh rates in the wild span 60, 75, 90, 120, 144, 165, 240Hz. A naïve "tick once per frame" loop therefore runs the simulation at the display's rate, which on a 144Hz panel speeds the game up by 2.4× and on a 30Hz tab slows it to half-speed. The fixed-step accumulator (Glenn Fiedler's "Fix Your Timestep!" is canonical) is the standard mitigation: render rate floats with the display, sim rate stays at its design tick.
+- **Alternatives:**
+  - *Phaser's built-in fixed-step* — rejected as a default. Phaser's loop is built around its own `update(time, delta)` semantics and physics; threading our own deterministic sim through it requires the same accumulator anyway, so we own the loop explicitly rather than fighting Phaser's defaults. Phaser remains the renderer; the loop is ours.
+  - *Tick once per frame and accept the speed-vs-refresh-rate coupling* — rejected. Breaks determinism guarantees from ADR-005 the moment a tester opens the build on anything other than a 60Hz monitor. Particularly bad for balance work where reproducibility matters.
+  - *Run the sim on a Web Worker at 60Hz, post state to the renderer* — rejected for v1. Worker-based isolation is genuinely cleaner but introduces a serialization boundary that complicates the subscriber dispatch contract (ADR-034). Revisit if main-thread sim+render perf becomes a bottleneck during balance.
+  - *Implement render-side interpolation between sim ticks* — rejected for v1, kept on the table. At 60Hz refresh rate the render-at-last-tick approach looks fine; at 120Hz+ entities render the same position twice in a row, which reads as slightly choppy. Acceptable for the playtest prototype. Revisit only if a tester flags it or if we move to a high-refresh display target.
+- **Consequences:** The sim's determinism contract is preserved at the integration layer — same seed + same input timing yields the same sim state across machines and refresh rates. The spiral-of-death cap means a long-backgrounded tab loses real time when it returns, rather than freezing the tab catching up; from the player's perspective the run continues from "now" and the score is correct because score is tick-counted, not wall-clock. Visual choppiness at high refresh is a known trade-off documented above. The accumulator's actual sim TPS is exposed in the debug overlay so we can verify it stays at 60 ± noise on every dev machine.
