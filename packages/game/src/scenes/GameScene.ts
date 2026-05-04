@@ -101,9 +101,13 @@ export class GameScene extends Phaser.Scene {
   private endBanner: string | null = null;
 
   private aimLine!: Phaser.GameObjects.Graphics;
+  private cooldownIndicator!: Phaser.GameObjects.Graphics;
   private mouseSimX = 0;
   private mouseSimY = 0;
+  private mousePxX = 0;
+  private mousePxY = 0;
   private mouseInside = false;
+  private injectCooldownTicks = 0;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -121,6 +125,7 @@ export class GameScene extends Phaser.Scene {
     // Fixed seed (42) so the prototype is reproducible session-to-session.
     // Site-driven seeding lands when the Site system is wired.
     this.sim = new Sim(config, 42);
+    this.injectCooldownTicks = config.actions.injectCooldown;
 
     this.cameras.main.setBackgroundColor('#000000');
 
@@ -173,7 +178,34 @@ export class GameScene extends Phaser.Scene {
 
     this.render();
     this.updateAimLine();
+    this.updateCooldownIndicator();
     this.updateOverlay();
+  }
+
+  private updateCooldownIndicator(): void {
+    this.cooldownIndicator.clear();
+    if (!this.mouseInside) return;
+    const state = this.sim.getState();
+    const cx = this.mousePxX + 12;
+    const cy = this.mousePxY + 12;
+    const radius = 5;
+    if (state.tick >= state.cooldowns.injectNeutron) {
+      // Ready: empty outline.
+      this.cooldownIndicator.lineStyle(1, 0xffffff, 1);
+      this.cooldownIndicator.strokeCircle(cx, cy, radius);
+    } else {
+      const remaining = state.cooldowns.injectNeutron - state.tick;
+      const progress =
+        this.injectCooldownTicks > 0
+          ? Math.max(0, Math.min(1, 1 - remaining / this.injectCooldownTicks))
+          : 1;
+      // Filled circle, color shifts gray (0x404040) → white (0xffffff) by
+      // progress. Linear ramp on each channel — cheap and readable.
+      const channel = Math.round(0x40 + progress * (0xff - 0x40));
+      const fill = (channel << 16) | (channel << 8) | channel;
+      this.cooldownIndicator.fillStyle(fill, 1);
+      this.cooldownIndicator.fillCircle(cx, cy, radius);
+    }
   }
 
   private updateAimLine(): void {
@@ -258,8 +290,13 @@ export class GameScene extends Phaser.Scene {
 
   private setupInput(): void {
     this.aimLine = this.add.graphics();
+    // cooldownIndicator draws above everything; bring to top after creation.
+    this.cooldownIndicator = this.add.graphics();
+    this.cooldownIndicator.setDepth(10);
 
     this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      this.mousePxX = pointer.x;
+      this.mousePxY = pointer.y;
       this.mouseSimX = pixelToSimX(pointer.x);
       this.mouseSimY = pixelToSimY(pointer.y);
       this.mouseInside =
@@ -284,6 +321,10 @@ export class GameScene extends Phaser.Scene {
     // The preview line in updateAimLine() shares the same computeEdgeSpawn
     // geometry, so what the player sees is what they get.
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
+      // Always show a click flash, even if the sim later rejects the input
+      // (cooldown, run-ended). The player must see SOMETHING happened.
+      this.spawnClickFlash(pointer.x, pointer.y);
+
       const cursorSimX = pixelToSimX(pointer.x);
       const cursorSimY = pixelToSimY(pointer.y);
       const geom = computeEdgeSpawn(cursorSimX, cursorSimY);
@@ -297,6 +338,17 @@ export class GameScene extends Phaser.Scene {
         this.hasReceivedFirstInput = true;
         this.dismissInstructions();
       }
+    });
+  }
+
+  private spawnClickFlash(pxX: number, pxY: number): void {
+    const flash = this.add.circle(pxX, pxY, 8, 0xffffff, 0.6);
+    flash.setDepth(9);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 200,
+      onComplete: () => flash.destroy(),
     });
   }
 
