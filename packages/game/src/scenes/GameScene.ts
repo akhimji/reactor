@@ -39,18 +39,23 @@ const STATE_ALPHA: Record<AtomState, number> = {
   spent: 0.2,
 };
 
+// Sim playfield is centered on (0, 0), spanning [-PLAYFIELD_HALF_UNITS,
+// +PLAYFIELD_HALF_UNITS] on each axis. Pixel space is [0, CANVAS_SIZE]
+// with origin at top-left and Y growing downward (Phaser/screen convention),
+// while sim Y is mathematical (up = +). The canonical re-centering form
+// (simX + 50) * 8 makes the offset explicit; (50 - simY) * 8 inverts Y in
+// the same expression.
 function simToPixelX(simX: number): number {
-  return simX * PIXELS_PER_UNIT + CENTER_PX;
+  return (simX + PLAYFIELD_HALF_UNITS) * PIXELS_PER_UNIT;
 }
 function simToPixelY(simY: number): number {
-  // Sim Y is mathematical (up = +). Phaser Y is screen (down = +). Invert.
-  return -simY * PIXELS_PER_UNIT + CENTER_PX;
+  return (PLAYFIELD_HALF_UNITS - simY) * PIXELS_PER_UNIT;
 }
 function pixelToSimX(pxX: number): number {
-  return (pxX - CENTER_PX) / PIXELS_PER_UNIT;
+  return pxX / PIXELS_PER_UNIT - PLAYFIELD_HALF_UNITS;
 }
 function pixelToSimY(pxY: number): number {
-  return -(pxY - CENTER_PX) / PIXELS_PER_UNIT;
+  return PLAYFIELD_HALF_UNITS - pxY / PIXELS_PER_UNIT;
 }
 
 export class GameScene extends Phaser.Scene {
@@ -90,6 +95,7 @@ export class GameScene extends Phaser.Scene {
     this.setupSubscriptions();
     this.setupInput();
     this.setupOverlay();
+    this.logCoordinateVerification();
 
     // Debug seed: hardcoded fuel rod at origin so there's something to see and
     // interact with. ~11 atoms across the rod's release schedule. Replaced by
@@ -134,6 +140,28 @@ export class GameScene extends Phaser.Scene {
 
     this.render();
     this.updateOverlay();
+  }
+
+  // Sanity check that prints sim → pixel mappings for canonical points to
+  // the console at startup. If atoms ever appear off-center, this is the
+  // first place to look — the printed values must match the comments.
+  private logCoordinateVerification(): void {
+    const samples: Array<readonly [string, number, number]> = [
+      ['origin       ', 0, 0],
+      ['top edge     ', 0, PLAYFIELD_HALF_UNITS],
+      ['bottom edge  ', 0, -PLAYFIELD_HALF_UNITS],
+      ['left edge    ', -PLAYFIELD_HALF_UNITS, 0],
+      ['right edge   ', PLAYFIELD_HALF_UNITS, 0],
+    ];
+    const lines = samples.map(
+      ([label, sx, sy]) =>
+        `  ${label} sim(${sx}, ${sy})  →  px(${simToPixelX(sx)}, ${simToPixelY(sy)})`,
+    );
+    console.log(
+      `[reactor] coordinate map (canvas ${CANVAS_SIZE}×${CANVAS_SIZE}, ${PIXELS_PER_UNIT} px/unit):\n` +
+        lines.join('\n') +
+        `\n  expect: origin → (${CENTER_PX}, ${CENTER_PX}); corners at 0 and ${CANVAS_SIZE}.`,
+    );
   }
 
   private setupSubscriptions(): void {
