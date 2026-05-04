@@ -1,10 +1,12 @@
-import { advanceTick, createSimState, loadConfig } from '@reactor/sim';
-import defaultConfig from '@reactor/sim/configs/default.json' with { type: 'json' };
+import Phaser from 'phaser';
+import { CANVAS_SIZE, GameScene } from './scenes/GameScene.js';
 
-// Smoke test the sim wiring at boot. Real Phaser scene + render loop land in
-// the next milestone (sim spec §13: minimal Phaser scene with placeholder graphics).
-const config = loadConfig(defaultConfig);
-const initial = createSimState(Date.now() | 0, config);
-const next = advanceTick(initial, [], config);
-
-console.log('[reactor] sim wired:', { initialTick: initial.tick, nextTick: next.tick });
+new Phaser.Game({
+  type: Phaser.AUTO,
+  parent: 'game',
+  width: CANVAS_SIZE,
+  height: CANVAS_SIZE,
+  backgroundColor: '#000000',
+  banner: false,
+  scene: [GameScene],
+});
