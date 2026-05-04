@@ -5,6 +5,7 @@ import {
   type AtomId,
   type AtomState,
   type AtomType,
+  type CriticalityZone,
   type InputCommand,
   type NeutronId,
 } from '@reactor/sim';
@@ -37,6 +38,19 @@ const STATE_ALPHA: Record<AtomState, number> = {
   excited: 1.0,
   splitting: 0.5,
   spent: 0.2,
+};
+
+// Zone color is the player's primary signal of how the chain reaction is
+// going. Color comes from this map; the `—` fallback is used while the sim
+// hasn't populated criticality (first tick or no fissions yet).
+const ZONE_COLORS: Record<CriticalityZone | '—', string> = {
+  extinct: '#444',
+  subcritical: '#FFF',
+  nominal: '#0F0',
+  supercritical: '#FF0',
+  runaway: '#F80',
+  meltdown: '#F00',
+  '—': '#888',
 };
 
 // Sim playfield is centered on (0, 0), spanning [-PLAYFIELD_HALF_UNITS,
@@ -472,10 +486,16 @@ export class GameScene extends Phaser.Scene {
   private updateOverlay(): void {
     const state = this.sim.getState();
     const k = state.criticality?.k ?? 0;
-    const zone = state.criticality?.zone ?? '—';
+    const zone: CriticalityZone | '—' = state.criticality?.zone ?? '—';
+    const zoneColor = ZONE_COLORS[zone];
     const banner = this.endBanner ? `\n${this.endBanner}` : '';
-    this.overlayLeft.textContent =
-      `tick  ${state.tick}\nk     ${k.toFixed(3)}\nzone  ${zone}\n` +
+    // innerHTML is intentional: we wrap the zone label in a span with an
+    // inline color. All other content is sim-controlled numbers/enums; no
+    // user input ever flows into this string.
+    this.overlayLeft.innerHTML =
+      `tick  ${state.tick}\n` +
+      `k = ${k.toFixed(3)}\n` +
+      `zone  <span style="color:${zoneColor}">${zone}</span>\n` +
       `tps   ${this.simTps}\nfps   ${this.fps}\nacc   ${this.accumulator.toFixed(1)}ms${banner}`;
     this.overlayRight.textContent =
       `score    ${state.score}\natoms    ${state.atoms.size}\nneutrons ${state.neutrons.size}`;
