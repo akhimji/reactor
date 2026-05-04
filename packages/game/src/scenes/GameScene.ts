@@ -82,6 +82,15 @@ export class GameScene extends Phaser.Scene {
     this.setupInput();
     this.setupOverlay();
 
+    // Debug seed: hardcoded fuel rod at origin so there's something to see and
+    // interact with. ~11 atoms across the rod's release schedule. Replaced by
+    // Site config loading once the Site system is wired.
+    this.pendingInputs.push({
+      type: 'placeFuelRod',
+      position: { x: 0, y: 0 },
+      fuelMix: { U235: 8, U238: 2, Pu239: 1 },
+    });
+
     this.lastTime = performance.now();
   }
 
