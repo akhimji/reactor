@@ -85,7 +85,14 @@ export class GameScene extends Phaser.Scene {
   }
 
   create(): void {
-    const config = loadConfig(defaultConfig);
+    const baseConfig = loadConfig(defaultConfig);
+    // ADR-038: prototype-mode extinction grace is extended to 1800 ticks
+    // (30 s) so a tester can orient before the run dies. Production Sites
+    // set their own grace via Site config when the Site system lands.
+    const config = loadConfig({
+      ...baseConfig,
+      endConditions: { ...baseConfig.endConditions, extinctionGracePeriod: 1800 },
+    });
     // Fixed seed (42) so the prototype is reproducible session-to-session.
     // Site-driven seeding lands when the Site system is wired.
     this.sim = new Sim(config, 42);
