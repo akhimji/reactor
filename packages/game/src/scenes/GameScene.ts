@@ -279,15 +279,19 @@ export class GameScene extends Phaser.Scene {
       this.mouseInside = true;
     });
 
+    // Click semantics: a click anywhere on the canvas spawns a neutron at
+    // the playfield edge OPPOSITE the cursor and travels TOWARD the cursor.
+    // The preview line in updateAimLine() shares the same computeEdgeSpawn
+    // geometry, so what the player sees is what they get.
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
-      const simX = pixelToSimX(pointer.x);
-      const simY = pixelToSimY(pointer.y);
-      const len = Math.hypot(simX, simY);
-      if (len === 0) return; // can't normalize a zero vector
+      const cursorSimX = pixelToSimX(pointer.x);
+      const cursorSimY = pixelToSimY(pointer.y);
+      const geom = computeEdgeSpawn(cursorSimX, cursorSimY);
+      if (!geom) return;
       this.pendingInputs.push({
         type: 'injectNeutron',
-        position: { x: simX, y: simY },
-        direction: { x: simX / len, y: simY / len },
+        position: geom.edge,
+        direction: geom.dir,
       });
       if (!this.hasReceivedFirstInput) {
         this.hasReceivedFirstInput = true;
