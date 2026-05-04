@@ -58,6 +58,24 @@ function pixelToSimY(pxY: number): number {
   return PLAYFIELD_HALF_UNITS - pxY / PIXELS_PER_UNIT;
 }
 
+// Given a cursor position in sim coords, return the edge-spawn point on the
+// opposite side of the playfield (so a neutron launched from edge → cursor
+// crosses the playfield) and the unit direction toward the cursor. Returns
+// null if the cursor is at the origin (no defined direction).
+function computeEdgeSpawn(
+  cursorSimX: number,
+  cursorSimY: number,
+): { edge: { x: number; y: number }; dir: { x: number; y: number } } | null {
+  const m = Math.max(Math.abs(cursorSimX), Math.abs(cursorSimY));
+  if (m < 1e-6) return null;
+  const scale = PLAYFIELD_HALF_UNITS / m;
+  const edge = { x: -cursorSimX * scale, y: -cursorSimY * scale };
+  const dx = cursorSimX - edge.x;
+  const dy = cursorSimY - edge.y;
+  const len = Math.hypot(dx, dy);
+  return { edge, dir: { x: dx / len, y: dy / len } };
+}
+
 export class GameScene extends Phaser.Scene {
   private sim!: Sim;
   private readonly atomSprites = new Map<AtomId, Phaser.GameObjects.Arc>();
@@ -81,6 +99,11 @@ export class GameScene extends Phaser.Scene {
   private instructionsOverlay: HTMLElement | null = null;
   private hasReceivedFirstInput = false;
   private endBanner: string | null = null;
+
+  private aimLine!: Phaser.GameObjects.Graphics;
+  private mouseSimX = 0;
+  private mouseSimY = 0;
+  private mouseInside = false;
 
   constructor() {
     super({ key: 'GameScene' });
@@ -149,7 +172,20 @@ export class GameScene extends Phaser.Scene {
     }
 
     this.render();
+    this.updateAimLine();
     this.updateOverlay();
+  }
+
+  private updateAimLine(): void {
+    this.aimLine.clear();
+    if (!this.mouseInside) return;
+    const geom = computeEdgeSpawn(this.mouseSimX, this.mouseSimY);
+    if (!geom) return;
+    this.aimLine.lineStyle(1, 0xffffff, 0.3);
+    this.aimLine.beginPath();
+    this.aimLine.moveTo(simToPixelX(geom.edge.x), simToPixelY(geom.edge.y));
+    this.aimLine.lineTo(simToPixelX(this.mouseSimX), simToPixelY(this.mouseSimY));
+    this.aimLine.strokePath();
   }
 
   // Sanity check that prints sim → pixel mappings for canonical points to
@@ -221,6 +257,28 @@ export class GameScene extends Phaser.Scene {
   }
 
   private setupInput(): void {
+    this.aimLine = this.add.graphics();
+
+    this.input.on('pointermove', (pointer: Phaser.Input.Pointer) => {
+      this.mouseSimX = pixelToSimX(pointer.x);
+      this.mouseSimY = pixelToSimY(pointer.y);
+      this.mouseInside =
+        pointer.x >= 0 &&
+        pointer.x <= CANVAS_SIZE &&
+        pointer.y >= 0 &&
+        pointer.y <= CANVAS_SIZE;
+    });
+
+    // Phaser stops firing pointermove once the cursor leaves the canvas, so
+    // hook the DOM canvas element directly to clear the aim line.
+    const canvas = this.game.canvas;
+    canvas.addEventListener('mouseleave', () => {
+      this.mouseInside = false;
+    });
+    canvas.addEventListener('mouseenter', () => {
+      this.mouseInside = true;
+    });
+
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       const simX = pixelToSimX(pointer.x);
       const simY = pixelToSimY(pointer.y);
