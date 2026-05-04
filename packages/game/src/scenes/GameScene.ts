@@ -62,6 +62,15 @@ export class GameScene extends Phaser.Scene {
   private accumulator = 0;
   private lastTime = 0;
 
+  // Rolling 1-second counters for the debug overlay. Reset each time
+  // wallclock crosses a second boundary; sim TPS verifies the accumulator
+  // is keeping pace at 60Hz regardless of display refresh rate.
+  private tickCountSecond = 0;
+  private frameCountSecond = 0;
+  private secondStartedAt = 0;
+  private simTps = 0;
+  private fps = 0;
+
   private overlayLeft!: HTMLElement;
   private overlayRight!: HTMLElement;
   private endBanner: string | null = null;
@@ -92,6 +101,7 @@ export class GameScene extends Phaser.Scene {
     });
 
     this.lastTime = performance.now();
+    this.secondStartedAt = this.lastTime;
   }
 
   override update(): void {
@@ -110,6 +120,16 @@ export class GameScene extends Phaser.Scene {
     // Spiral-of-death cap: drop accumulated debt rather than grinding through it.
     if (ticks === MAX_TICKS_PER_FRAME) {
       this.accumulator = 0;
+    }
+
+    this.tickCountSecond += ticks;
+    this.frameCountSecond += 1;
+    if (now - this.secondStartedAt >= 1000) {
+      this.simTps = this.tickCountSecond;
+      this.fps = this.frameCountSecond;
+      this.tickCountSecond = 0;
+      this.frameCountSecond = 0;
+      this.secondStartedAt = now;
     }
 
     this.render();
@@ -228,7 +248,8 @@ export class GameScene extends Phaser.Scene {
     const zone = state.criticality?.zone ?? '—';
     const banner = this.endBanner ? `\n${this.endBanner}` : '';
     this.overlayLeft.textContent =
-      `tick  ${state.tick}\nk     ${k.toFixed(3)}\nzone  ${zone}${banner}`;
+      `tick  ${state.tick}\nk     ${k.toFixed(3)}\nzone  ${zone}\n` +
+      `tps   ${this.simTps}\nfps   ${this.fps}\nacc   ${this.accumulator.toFixed(1)}ms${banner}`;
     this.overlayRight.textContent =
       `score    ${state.score}\natoms    ${state.atoms.size}\nneutrons ${state.neutrons.size}`;
   }
